@@ -3,15 +3,90 @@ import os
 import googlemaps
 from tabulate import tabulate
 
+#Voice recognition
+import speech_recognition as sr
+import pyttsx3
+
 # Replace this with your actual Google API Key
-GOOGLE_API_KEY = "ADD YOUR OWN GOOGLE API KEY HERE"
+GOOGLE_API_KEY = "ADD YOUR GOOGLE API KEY HERE"
 
 EXCEL_FILE = "places_to_call.xlsx"
+
+engine = pyttsx3.init()
+
+valid_commands = [
+    "list all",
+    "get all numbers",
+    "save",
+    "exit",
+    "called",
+    "list called",
+    "comment",
+    "reset comment",
+    "list dont call",
+    "dont call",
+    "callback",
+    "list callback",
+    "tocall",
+    "list tocall",
+    "help",
+]
+
+
+
+
+#---------------------------------Voice Recognition---------------------------------#
+mic = sr.Microphone()
+recognizer = sr.Recognizer()
+
+def listen_for_command():
+    with mic as source:
+        speak("Listening for command")
+        print("Listening for command...")
+        recognizer.adjust_for_ambient_noise(source)
+        audio = recognizer.listen(source)
+
+    try:
+        command = recognizer.recognize_google(audio).lower().strip()
+        print(f"✅ You said: {command}")
+
+        # Check if command is valid
+        for valid in valid_commands:
+            if command.startswith(valid):
+                return command
+        
+        # If command is not recognized
+        speak("I'm sorry, please give a valid command.")
+        return None
+
+    except sr.UnknownValueError:
+        speak("I couldn't understand that. Please try again.")
+        return None
+    except sr.RequestError:
+        speak("Speech recognition service is unavailable.")
+        return None
+
+#---------------------------------Speaking---------------------------------#
+def speak(text):
+    print(f"🗣️ Speaking: {text}")
+    engine.say(text)
+    engine.runAndWait()
+
+
+
+
+
+
+
+
+
+
+#---------------------------------Functions---------------------------------#
 
 # Initialize Google Maps API client
 gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
 
-def load_data(file_path):
+def load_data(file_path): 
     """Load Excel file into a pandas DataFrame and ensure required columns exist."""
     if not os.path.exists(file_path):
         print(f"Error: {file_path} does not exist.")
@@ -366,7 +441,43 @@ def reset_comment(df, place_name, new_comment):
 
 
 
+#---------------------------------Add Comment---------------------------------#
+def add_comment(df, place_name, comment):
+    """
+    Add a comment to a business in the Excel file.
+    If a comment already exists, append the new comment with a timestamp.
+    """
+    place_mask = df['Name'].str.lower().str.strip() == place_name.lower().strip()
+
+    if not place_mask.any():
+        print(f"❌ No matching place found for '{place_name}'.")
+        return df
+
+    # Ensure 'Comments' column exists and is a string
+    df['Comments'] = df['Comments'].astype(str).replace("nan", "").fillna("")
+
+    # Append new comment with timestamp
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    new_comment = f"{timestamp}: {comment}"
+
+    if df.loc[place_mask, 'Comments'].str.strip().eq("").any():
+        df.loc[place_mask, 'Comments'] = new_comment
+    else:
+        df.loc[place_mask, 'Comments'] += " | " + new_comment
+
+    print(f"✅ Comment added for {place_name}: {new_comment}")
+    return df
+
+
+
+
+#---------------------------------Main Function---------------------------------#
+
 def main():
+
+    speak("Welcome to the Cold Call Tracker!")
+
     df = load_data(EXCEL_FILE)
     if df is None:
         return
@@ -375,8 +486,25 @@ def main():
     print("✅ Type `Help` to see all available commands.")
     print("✅ Type `Exit` to quit.")
 
+    voice_mode = False  # Voice control is OFF initially
+    firstLoop = True
+
     while True:
-        user_input = input("\nEnter command: ").strip().lower()
+        if not voice_mode:
+            print("\nEnter command or type 'voice' to activate voice control : ")
+            speak("Enter command or type voice to activate voice control")
+            user_input = input(" ").strip().lower()
+
+            if user_input == 'voice':
+                speak("Voice control activated")
+                voice_mode = True
+                continue  # Restart loop to start voice input
+
+        if voice_mode:
+            print("\nListening for command...")
+            user_input = listen_for_command()
+            if user_input is None:
+                continue  # Try again if speech wasn't understood
 
         if user_input == 'exit':
             save_data(df, EXCEL_FILE)
@@ -389,7 +517,7 @@ def main():
         elif user_input == "list all":
             list_all(df)
 
-        elif user_input.startswith("called "):
+        elif user_input and user_input.startswith("called "):
             place_name = user_input[7:].strip()
             df = mark_called(df, place_name)
             save_data(df, EXCEL_FILE)
@@ -400,7 +528,7 @@ def main():
         elif user_input == "get all numbers":
             df = get_all_numbers(df)
 
-        elif user_input.startswith("comment "):
+        elif user_input and user_input.startswith("comment "):
             parts = user_input[8:].split(" - ")
             if len(parts) == 2:
                 place_name, comment = parts[0].strip(), parts[1].strip()
@@ -412,8 +540,7 @@ def main():
         elif user_input == "save":
             save_data(df, EXCEL_FILE)
 
-            
-        elif user_input.startswith("reset comment "):
+        elif user_input and user_input.startswith("reset comment "):
             parts = user_input[14:].split(" - ")
             if len(parts) == 2:
                 place_name, new_comment = parts[0].strip(), parts[1].strip()
@@ -422,37 +549,32 @@ def main():
             else:
                 print("❌ Use format: 'Reset Comment BusinessName - New Comment'")
 
-
         elif user_input == "list dont call":
             list_by_status(df, "Don't Call")
 
-        elif user_input.startswith("dont call "): 
-            place_name = user_input[len("dont call "):].strip()  # Correct slicing
+        elif user_input and user_input.startswith("dont call "):
+            place_name = user_input[len("dont call "):].strip()
             df = mark_dont_call(df, place_name)
             save_data(df, EXCEL_FILE)
 
-
-        elif user_input.startswith("callback "): 
-            place_name = user_input[len("callback "):].strip()  # Correct string slicing
+        elif user_input and user_input.startswith("callback "):
+            place_name = user_input[len("callback "):].strip()
             df = mark_callback(df, place_name)
             save_data(df, EXCEL_FILE)
 
         elif user_input == "list callback":
             list_callback(df)
 
-
-        elif user_input.startswith("tocall "): 
-            place_name = user_input[len("tocall "):].strip()  # Extract business name
+        elif user_input and user_input.startswith("tocall "):
+            place_name = user_input[len("tocall "):].strip()
             df = mark_tocall(df, place_name)
             save_data(df, EXCEL_FILE)
 
         elif user_input == "list tocall":
             list_tocall(df)
 
-
         else:
             print("❌ Unrecognized command. Type `Help` to see available commands.")
 
 if __name__ == "__main__":
     main()
-
