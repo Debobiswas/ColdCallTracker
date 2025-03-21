@@ -7,6 +7,12 @@ from tabulate import tabulate
 import speech_recognition as sr
 import pyttsx3
 
+
+#GUI
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+
+
 # Replace this with your actual Google API Key
 GOOGLE_API_KEY = "ADD YOUR GOOGLE API KEY HERE"
 
@@ -17,6 +23,7 @@ engine = pyttsx3.init()
 valid_commands = [
     "list all",
     "get all numbers",
+
     "save",
     "exit",
     "called",
@@ -469,6 +476,75 @@ def add_comment(df, place_name, comment):
     print(f"✅ Comment added for {place_name}: {new_comment}")
     return df
 
+#--------------------------------- GUI ---------------------------------#
+def launch_gui(df):
+    def refresh_table():
+        # Clear existing rows
+        for row in tree.get_children():
+            tree.delete(row)
+
+        # Insert updated data
+        for _, row in df.iterrows():
+            tree.insert("", "end", values=(
+                row["Name"],
+                row["Number"],
+                row["Address"],
+                row["Status"],
+                row["Comments"]
+            ))
+
+    def mark_called_gui():
+        selected = tree.focus()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a business.")
+            return
+        place_name = tree.item(selected)['values'][0]
+        nonlocal df
+        df = mark_called(df, place_name)
+        refresh_table()
+
+    def add_comment_gui():
+        selected = tree.focus()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a business.")
+            return
+        place_name = tree.item(selected)['values'][0]
+        comment = simpledialog.askstring("Add Comment", f"Add comment for {place_name}:")
+        if comment:
+            nonlocal df
+            df = add_comment(df, place_name, comment)
+            refresh_table()
+
+    def save_changes():
+        save_data(df, EXCEL_FILE)
+        messagebox.showinfo("Saved", "Changes saved to Excel.")
+
+    # --- TK Window Setup ---
+    root = tk.Tk()
+    root.title("Cold Call Tracker")
+    root.geometry("1000x500")
+
+    # --- Table (Treeview) ---
+    columns = ("Name", "Number", "Address", "Status", "Comments")
+    tree = ttk.Treeview(root, columns=columns, show="headings")
+    for col in columns:
+        tree.heading(col, text=col)
+        tree.column(col, anchor=tk.W, width=180)
+
+    tree.pack(expand=True, fill=tk.BOTH)
+
+    # --- Buttons ---
+    button_frame = tk.Frame(root)
+    button_frame.pack(fill=tk.X)
+
+    tk.Button(button_frame, text="Mark Called", command=mark_called_gui).pack(side=tk.LEFT, padx=5, pady=5)
+    tk.Button(button_frame, text="Add Comment", command=add_comment_gui).pack(side=tk.LEFT, padx=5, pady=5)
+    tk.Button(button_frame, text="Save", command=save_changes).pack(side=tk.LEFT, padx=5, pady=5)
+    tk.Button(button_frame, text="Exit", command=root.quit).pack(side=tk.RIGHT, padx=5, pady=5)
+
+    refresh_table()
+    root.mainloop()
+
 
 
 
@@ -499,6 +575,11 @@ def main():
                 speak("Voice control activated")
                 voice_mode = True
                 continue  # Restart loop to start voice input
+
+
+            elif user_input == "gui":
+                launch_gui(df)
+                continue
 
         if voice_mode:
             print("\nListening for command...")
