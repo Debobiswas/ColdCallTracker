@@ -14,7 +14,7 @@ from tkinter import ttk, messagebox, simpledialog
 
 
 # Replace this with your actual Google API Key
-GOOGLE_API_KEY = "ADD YOUR GOOGLE API KEY HERE"
+GOOGLE_API_KEY = "AIzaSyBTxZR3sCSyDS1UaMu-LvhHbwhx6R_qZQ4"
 
 EXCEL_FILE = "places_to_call.xlsx"
 
@@ -93,40 +93,38 @@ def speak(text):
 # Initialize Google Maps API client
 gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
 
-def load_data(file_path): 
-    """Load Excel file into a pandas DataFrame and ensure required columns exist."""
+def create_empty_excel():
+    """Create an empty Excel file with the required columns if it doesn't exist."""
+    if not os.path.exists(EXCEL_FILE):
+        df = pd.DataFrame(columns=['Name', 'Number', 'Address', 'Status', 'Comments'])
+        save_to_excel(df)
+
+def load_data(file_path=EXCEL_FILE):
+    """Load data from Excel file, create if doesn't exist."""
     if not os.path.exists(file_path):
-        print(f"Error: {file_path} does not exist.")
-        return None
+        create_empty_excel()
+    return pd.read_excel(file_path)
 
-    df = pd.read_excel(file_path)
-
-    # Standardize column names to remove hidden spaces
-    df.columns = df.columns.str.strip()
-
-    # Check if 'Name' column exists
-    if 'Name' not in df.columns:
-        print("❌ Error: The Excel file must contain a 'Name' column.")
-        print("Detected columns:", df.columns)
-        return None
-
-    # Ensure required columns exist
-    for col in ["Status", "Number", "Address", "Comments"]:
-        if col not in df.columns:
-            df[col] = ""  # Initialize missing columns
-
-    # Set the default status to "To Call" where status is empty
-    df['Status'] = df['Status'].replace("", "To Call")
-
-    return df
-
-
-
-
-def save_data(df, file_path):
-    """Save the DataFrame back to Excel."""
-    df.to_excel(file_path, index=False)
-    print("✅ Data saved successfully.")
+def save_to_excel(df, file_path=EXCEL_FILE):
+    """
+    Save DataFrame to Excel with verification.
+    Ensures file is properly closed after saving.
+    """
+    try:
+        print(f"Saving to Excel: {file_path}")
+        df.to_excel(file_path, index=False)
+        
+        # Verify the save worked by reloading
+        try:
+            verification_df = pd.read_excel(file_path)
+            print(f"Save verified: {file_path} - {len(verification_df)} rows saved.")
+            return True
+        except Exception as e:
+            print(f"ERROR verifying save: {str(e)}")
+            return False
+    except Exception as e:
+        print(f"ERROR saving to Excel: {str(e)}")
+        return False
 
 def get_business_details_online(place_name):
     """
@@ -259,7 +257,7 @@ def get_all_numbers(df):
             print(f"❌ No address found for {place_name}.")
 
     print("✅ All available numbers and addresses retrieved and updated.")
-    save_data(df, EXCEL_FILE)  # Save changes to Excel
+    save_to_excel(df)  # Save changes to Excel
     return df
 
 
@@ -348,18 +346,6 @@ def list_callback(df):
 
 
 
-
-
-def save_to_excel(df):
-    """
-    Saves the current DataFrame to the Excel file.
-    Ensures that the data is properly written and confirms success.
-    """
-    try:
-        df.to_excel(EXCEL_FILE, index=False)
-        print(f"✅ Data successfully saved to {EXCEL_FILE}")
-    except Exception as e:
-        print(f"❌ Error saving to Excel: {e}")
 
 
 def help():
@@ -478,6 +464,14 @@ def add_comment(df, place_name, comment):
 
 #--------------------------------- GUI ---------------------------------#
 def launch_gui(df):
+
+    from tkinter import font
+    style = ttk.Style()
+    style.theme_use('clam')  # or try 'alt', 'default', 'vista'
+    style.configure("Treeview.Heading", font=('Segoe UI', 11, 'bold'))
+    style.configure("Treeview", font=('Segoe UI', 10))
+
+
     def refresh_table():
         # Clear existing rows
         for row in tree.get_children():
@@ -516,7 +510,7 @@ def launch_gui(df):
             refresh_table()
 
     def save_changes():
-        save_data(df, EXCEL_FILE)
+        save_to_excel(df)
         messagebox.showinfo("Saved", "Changes saved to Excel.")
 
     # --- TK Window Setup ---
@@ -529,7 +523,11 @@ def launch_gui(df):
     tree = ttk.Treeview(root, columns=columns, show="headings")
     for col in columns:
         tree.heading(col, text=col)
-        tree.column(col, anchor=tk.W, width=180)
+        if col == "Comments":
+            tree.column(col, anchor=tk.W, width=300)
+        else:
+            tree.column(col, anchor=tk.W, width=150)
+
 
     tree.pack(expand=True, fill=tk.BOTH)
 
@@ -537,10 +535,14 @@ def launch_gui(df):
     button_frame = tk.Frame(root)
     button_frame.pack(fill=tk.X)
 
-    tk.Button(button_frame, text="Mark Called", command=mark_called_gui).pack(side=tk.LEFT, padx=5, pady=5)
-    tk.Button(button_frame, text="Add Comment", command=add_comment_gui).pack(side=tk.LEFT, padx=5, pady=5)
-    tk.Button(button_frame, text="Save", command=save_changes).pack(side=tk.LEFT, padx=5, pady=5)
-    tk.Button(button_frame, text="Exit", command=root.quit).pack(side=tk.RIGHT, padx=5, pady=5)
+    def styled_btn(text, cmd):
+        return tk.Button(button_frame, text=text, command=cmd, font=('Segoe UI', 10, 'bold'), bg="#2e86de", fg="white", padx=10, pady=5)
+
+    styled_btn("Mark Called", mark_called_gui).pack(side=tk.LEFT, padx=5, pady=5)
+    styled_btn("Add Comment", add_comment_gui).pack(side=tk.LEFT, padx=5, pady=5)
+    styled_btn("Save", save_changes).pack(side=tk.LEFT, padx=5, pady=5)
+    styled_btn("Exit", root.quit).pack(side=tk.RIGHT, padx=5, pady=5)
+
 
     refresh_table()
     root.mainloop()
@@ -554,7 +556,7 @@ def main():
 
     speak("Welcome to the Cold Call Tracker!")
 
-    df = load_data(EXCEL_FILE)
+    df = load_data()
     if df is None:
         return
 
@@ -588,7 +590,7 @@ def main():
                 continue  # Try again if speech wasn't understood
 
         if user_input == 'exit':
-            save_data(df, EXCEL_FILE)
+            save_to_excel(df)
             print("All changes saved. Goodbye!")
             break
 
@@ -601,7 +603,7 @@ def main():
         elif user_input and user_input.startswith("called "):
             place_name = user_input[7:].strip()
             df = mark_called(df, place_name)
-            save_data(df, EXCEL_FILE)
+            save_to_excel(df)
 
         elif user_input == "list called":
             list_by_status(df, "Called")
@@ -614,12 +616,12 @@ def main():
             if len(parts) == 2:
                 place_name, comment = parts[0].strip(), parts[1].strip()
                 df = add_comment(df, place_name, comment)
-                save_data(df, EXCEL_FILE)
+                save_to_excel(df)
             else:
                 print("❌ Use format: 'Comment BusinessName - Your Comment'")
 
         elif user_input == "save":
-            save_data(df, EXCEL_FILE)
+            save_to_excel(df)
 
         elif user_input and user_input.startswith("reset comment "):
             parts = user_input[14:].split(" - ")
@@ -636,12 +638,12 @@ def main():
         elif user_input and user_input.startswith("dont call "):
             place_name = user_input[len("dont call "):].strip()
             df = mark_dont_call(df, place_name)
-            save_data(df, EXCEL_FILE)
+            save_to_excel(df)
 
         elif user_input and user_input.startswith("callback "):
             place_name = user_input[len("callback "):].strip()
             df = mark_callback(df, place_name)
-            save_data(df, EXCEL_FILE)
+            save_to_excel(df)
 
         elif user_input == "list callback":
             list_callback(df)
@@ -649,13 +651,37 @@ def main():
         elif user_input and user_input.startswith("tocall "):
             place_name = user_input[len("tocall "):].strip()
             df = mark_tocall(df, place_name)
-            save_data(df, EXCEL_FILE)
+            save_to_excel(df)
 
         elif user_input == "list tocall":
             list_tocall(df)
 
         else:
             print("❌ Unrecognized command. Type `Help` to see available commands.")
+
+def api_direct_save(df, file_path=EXCEL_FILE):
+    """
+    Save DataFrame to Excel directly without any comment processing.
+    This is used by the API to ensure comments are not appended with timestamps.
+    """
+    print(f"API DIRECT SAVE to {file_path} - NO COMMENT PROCESSING")
+    try:
+        # Make a clean copy to avoid side effects
+        save_df = df.copy()
+        # Direct save with no processing
+        save_df.to_excel(file_path, index=False)
+        print(f"API direct save completed successfully to {file_path}")
+        return True
+    except Exception as e:
+        print(f"ERROR in api_direct_save: {str(e)}")
+        return False
+
+def ensure_date_columns(df):
+    if 'LastCalledDate' not in df.columns:
+        df['LastCalledDate'] = ''
+    if 'LastCallbackDate' not in df.columns:
+        df['LastCallbackDate'] = ''
+    return df
 
 if __name__ == "__main__":
     main()
