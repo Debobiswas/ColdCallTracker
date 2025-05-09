@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import googlemaps
 from tabulate import tabulate
+from dotenv import load_dotenv
 
 #Voice recognition
 import speech_recognition as sr
@@ -12,9 +13,13 @@ import pyttsx3
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
+# Load environment variables
+load_dotenv()
 
-# Replace this with your actual Google API Key
-GOOGLE_API_KEY = "AIzaSyBTxZR3sCSyDS1UaMu-LvhHbwhx6R_qZQ4"
+# Get API key from environment variable
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY not found in environment variables")
 
 EXCEL_FILE = "places_to_call.xlsx"
 
