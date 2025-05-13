@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FaHome, FaUserFriends, FaPhone, FaCalendarAlt, FaChartBar, FaCog, FaDollarSign, FaSearch, FaMapMarkerAlt } from "react-icons/fa";
+import { FaHome, FaUserFriends, FaPhone, FaCalendarAlt, FaChartBar, FaCog, FaDollarSign, FaSearch, FaMapMarkerAlt, FaSpider } from "react-icons/fa";
 import "./globals.css";
 
 export const metadata = {
@@ -24,6 +24,9 @@ export default function RootLayout({
               </Link>
               <Link href="/business-lookup" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
                 <FaSearch className="text-lg" /> Business Lookup
+              </Link>
+              <Link href="/custom-scraper" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
+                <FaSpider className="text-lg" /> Custom Scraper
               </Link>
               <Link href="/map" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
                 <FaMapMarkerAlt className="text-lg" /> Map

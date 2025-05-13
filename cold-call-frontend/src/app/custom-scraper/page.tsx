@@ -1,8 +1,9 @@
 "use client";
 import React, { useState, useEffect } from "react";
 
-export default function BusinessLookupPage() {
+export default function CustomScraperPage() {
   const [query, setQuery] = useState("");
+  const [location, setLocation] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -12,21 +13,20 @@ export default function BusinessLookupPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [filterLimit, setFilterLimit] = useState(15);
   const [filterNoWebsite, setFilterNoWebsite] = useState(false);
+  const [headless, setHeadless] = useState(true);
   // Temporary state for modal
   const [tempFilterLimit, setTempFilterLimit] = useState(filterLimit);
   const [tempFilterNoWebsite, setTempFilterNoWebsite] = useState(filterNoWebsite);
+  const [tempHeadless, setTempHeadless] = useState(headless);
   // State for expanded hours
   const [expandedHours, setExpandedHours] = useState<{ [key: string]: boolean }>({});
   // State to store existing businesses
   const [existingBusinesses, setExistingBusinesses] = useState<string[]>([]);
   // State to store the extracted industry from the search query
   const [industry, setIndustry] = useState<string>("");
-  // State for reasons popup
-  const [showReasons, setShowReasons] = useState(false);
-  const [reasons, setReasons] = useState<string[]>([]);
-  // State for explore distance slider
-  const [exploreDistance, setExploreDistance] = useState(0);
-  const [tempExploreDistance, setTempExploreDistance] = useState(exploreDistance);
+  // State for scraping progress
+  const [scrapingProgress, setScrapingProgress] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Fetch existing businesses from dashboard on component mount
   useEffect(() => {
@@ -119,13 +119,6 @@ export default function BusinessLookupPage() {
     return "Unknown Location";
   };
 
-  // Function to get today's day name
-  const getTodayHours = (hours: string[]) => {
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const today = days[new Date().getDay()];
-    return hours.find(h => h.startsWith(today)) || 'Closed today';
-  };
-
   // Function to toggle hours expansion
   const toggleHours = (businessName: string) => {
     setExpandedHours(prev => ({
@@ -137,21 +130,29 @@ export default function BusinessLookupPage() {
   function openFilterModal() {
     setTempFilterLimit(filterLimit);
     setTempFilterNoWebsite(filterNoWebsite);
-    setTempExploreDistance(exploreDistance);
+    setTempHeadless(headless);
     setShowFilter(true);
   }
 
   function handleApplyFilter() {
     setFilterLimit(tempFilterLimit);
     setFilterNoWebsite(tempFilterNoWebsite);
-    setExploreDistance(tempExploreDistance);
+    setHeadless(tempHeadless);
     setShowFilter(false);
   }
 
-  async function handleSearch() {
-    if (!query.trim()) return;
+  async function handleScrape() {
+    if (!query.trim() || !location.trim()) {
+      setError("Please enter both business type and location");
+      return;
+    }
+    
     setError("");
     setLoading(true);
+    setIsProcessing(true);
+    setScrapingProgress("Starting scraper...");
+    setResults([]);
+    
     try {
       // Extract industry from search query before making the API call
       const extractedIndustry = extractIndustry(query);
@@ -159,34 +160,62 @@ export default function BusinessLookupPage() {
       console.log(`Extracted industry from query "${query}": ${extractedIndustry}`);
       
       const params = new URLSearchParams({
-        query: query.trim(),
+        business_type: query.trim(),
+        location: location.trim(),
         limit: filterLimit.toString(),
         no_website: filterNoWebsite ? 'true' : 'false',
-        explore_distance_km: exploreDistance.toString()
+        headless: headless ? 'true' : 'false'
       });
-      console.log("Search parameters:", Object.fromEntries(params.entries()));
-      const res = await fetch(`http://localhost:8001/api/businesses/search?${params}`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      console.log("Search results before filtering:", data.results.length);
       
-      // Filter out businesses that already exist in the dashboard
-      const filteredResults = data.results.filter(business => 
-        !existingBusinesses.includes(business.name.toLowerCase().trim())
-      );
+      console.log("Scrape parameters:", Object.fromEntries(params.entries()));
       
-      console.log(`Filtered out ${data.results.length - filteredResults.length} existing businesses`);
-      console.log("Final results:", filteredResults.length);
+      // Start the scraping process
+      const startRes = await fetch(`http://localhost:8001/api/scraper/start?${params}`);
+      if (!startRes.ok) throw new Error(await startRes.text());
       
-      setResults(filteredResults);
+      // Poll for progress updates
+      const pollInterval = setInterval(async () => {
+        try {
+          const progressRes = await fetch("http://localhost:8001/api/scraper/progress");
+          if (progressRes.ok) {
+            const progressData = await progressRes.json();
+            setScrapingProgress(progressData.message);
+            
+            if (progressData.status === "completed") {
+              clearInterval(pollInterval);
+              setIsProcessing(false);
+              
+              // Fetch the results
+              const resultsRes = await fetch("http://localhost:8001/api/scraper/results");
+              if (resultsRes.ok) {
+                const data = await resultsRes.json();
+                
+                // Filter out businesses that already exist in the dashboard
+                const filteredResults = data.results.filter(business => 
+                  !existingBusinesses.includes(business.name.toLowerCase().trim())
+                );
+                
+                console.log(`Filtered out ${data.results.length - filteredResults.length} existing businesses`);
+                console.log("Final results:", filteredResults.length);
+                
+                setResults(filteredResults);
+              } else {
+                throw new Error("Failed to fetch results");
+              }
+            } else if (progressData.status === "error") {
+              clearInterval(pollInterval);
+              setIsProcessing(false);
+              throw new Error(progressData.message);
+            }
+          }
+        } catch (err) {
+          console.error("Error polling progress:", err);
+        }
+      }, 2000);
       
-      // Show reasons popup if we got fewer results than requested
-      if (data.reasons && data.reasons.length > 0) {
-        setReasons(data.reasons);
-        setShowReasons(true);
-      }
     } catch (err) {
-      setError("Failed to search businesses");
+      setError("Failed to start scraper: " + (err.message || "Unknown error"));
+      setIsProcessing(false);
     }
     setLoading(false);
   }
@@ -283,33 +312,58 @@ export default function BusinessLookupPage() {
   return (
     <div className="min-h-screen bg-white p-8">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Business Lookup</h1>
+        <h1 className="text-3xl font-bold mb-8">Custom Web Scraper</h1>
         
-        {/* Search Bar */}
-        <div className="mb-8">
+        {/* Search Form */}
+        <div className="mb-8 bg-white rounded-lg shadow-md p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Business Type</label>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="e.g., restaurants, dentists, plumbers..."
+                className="w-full p-2 border rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g., New York, NY, London, UK..."
+                className="w-full p-2 border rounded"
+              />
+            </div>
+          </div>
+          
           <div className="flex gap-4">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Enter business name..."
-              className="flex-1 p-2 border rounded"
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-            />
             <button
-              onClick={handleSearch}
-              disabled={loading}
+              onClick={handleScrape}
+              disabled={loading || isProcessing}
               className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-blue-300"
             >
-              {loading ? 'Searching...' : 'Search'}
+              {loading ? 'Starting...' : isProcessing ? 'Scraping...' : 'Start Scraping'}
             </button>
             <button
-              onClick={() => setShowFilter(true)}
+              onClick={openFilterModal}
               className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
             >
-              Filter
+              Options
             </button>
           </div>
+          
+          {/* Progress Indicator */}
+          {isProcessing && (
+            <div className="mt-4">
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                <div className="bg-blue-600 h-2.5 rounded-full w-full animate-pulse"></div>
+              </div>
+              <p className="text-sm text-gray-600">{scrapingProgress}</p>
+            </div>
+          )}
         </div>
 
         {/* Results */}
@@ -326,7 +380,6 @@ export default function BusinessLookupPage() {
                 <h2 className="text-xl font-semibold">Results</h2>
                 <p className="text-sm text-gray-600 mt-1">
                   Found {results.length} business{results.length !== 1 ? 'es' : ''}
-                  {results.length < filterLimit && ' (fewer than requested)'}
                 </p>
               </div>
               <button
@@ -345,10 +398,39 @@ export default function BusinessLookupPage() {
                       <h3 className="font-semibold">{result.name}</h3>
                       <p className="text-gray-600">{result.address}</p>
                       <p className="text-gray-600">{result.phone}</p>
-                      {result.website && (
+                      {result.website && result.website !== "N/A" && (
                         <a href={result.website} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
                           {result.website}
                         </a>
+                      )}
+                      
+                      {/* Display opening hours if available */}
+                      {result.opening_hours && result.opening_hours.length > 0 && (
+                        <div className="mt-2">
+                          <button
+                            onClick={() => toggleHours(result.name)}
+                            className="text-sm text-gray-600 flex items-center"
+                          >
+                            <span className="mr-1">{expandedHours[result.name] ? 'Hide' : 'Show'} hours</span>
+                            <svg
+                              className={`w-4 h-4 transition-transform ${expandedHours[result.name] ? 'transform rotate-180' : ''}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          
+                          {expandedHours[result.name] && (
+                            <div className="mt-2 pl-2 border-l-2 border-gray-200 text-sm text-gray-600">
+                              {result.opening_hours.map((hour, i) => (
+                                <div key={i}>{hour}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                     <button
@@ -359,34 +441,17 @@ export default function BusinessLookupPage() {
                       {loading ? 'Adding...' : addedIdx === idx ? 'Added' : 'Add'}
                     </button>
                   </div>
-                  {result.opening_hours && result.opening_hours.length > 0 && (
-                    <div className="mt-2">
-                      <button
-                        onClick={() => setExpandedHours(prev => ({ ...prev, [idx]: !prev[idx] }))}
-                        className="text-blue-500 hover:underline"
-                      >
-                        {expandedHours[idx] ? 'Hide Hours' : 'Show Hours'}
-                      </button>
-                      {expandedHours[idx] && (
-                        <div className="mt-2 text-sm text-gray-600">
-                          {result.opening_hours.map((hour, i) => (
-                            <div key={i}>{hour}</div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Filter Modal */}
+        {/* Options Modal */}
         {showFilter && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 w-96">
-              <h2 className="text-xl font-semibold mb-4">Filter Results</h2>
+              <h2 className="text-xl font-semibold mb-4">Scraper Options</h2>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Result Limit</label>
@@ -395,9 +460,10 @@ export default function BusinessLookupPage() {
                     value={tempFilterLimit}
                     onChange={(e) => setTempFilterLimit(Number(e.target.value))}
                     min="1"
-                    max="30"
+                    max="50"
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Maximum number of businesses to scrape (1-50)</p>
                 </div>
                 <div className="flex items-center">
                   <input
@@ -408,81 +474,34 @@ export default function BusinessLookupPage() {
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label htmlFor="noWebsite" className="ml-2 block text-sm text-gray-900">
-                    Only show businesses without websites (includes social media only)
+                    Only show businesses without websites
                   </label>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Explore nearby areas if not enough results (km)
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="headless"
+                    checked={tempHeadless}
+                    onChange={(e) => setTempHeadless(e.target.checked)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="headless" className="ml-2 block text-sm text-gray-900">
+                    Run browser in headless mode (hidden)
                   </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min="0"
-                      max="50"
-                      value={tempExploreDistance}
-                      onChange={e => setTempExploreDistance(Number(e.target.value))}
-                      className="w-full"
-                    />
-                    <span className="w-10 text-right">{tempExploreDistance} km</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">0 disables extra searches. Up to 50 km in 8 directions.</p>
                 </div>
               </div>
               <div className="mt-6 flex justify-end space-x-3">
                 <button
-                  onClick={() => {
-                    setTempFilterLimit(filterLimit);
-                    setTempFilterNoWebsite(filterNoWebsite);
-                    setTempExploreDistance(exploreDistance);
-                    setShowFilter(false);
-                  }}
+                  onClick={() => setShowFilter(false)}
                   className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setFilterLimit(tempFilterLimit);
-                    setFilterNoWebsite(tempFilterNoWebsite);
-                    setExploreDistance(tempExploreDistance);
-                    setShowFilter(false);
-                    console.log("Filter applied:", {limit: tempFilterLimit, noWebsite: tempFilterNoWebsite, exploreDistance: tempExploreDistance});
-                    if (query.trim()) handleSearch();
-                  }}
+                  onClick={handleApplyFilter}
                   className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                 >
                   Apply
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Reasons Popup */}
-        {showReasons && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-96">
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-xl font-semibold">Fewer Results Found</h2>
-                <button 
-                  onClick={() => setShowReasons(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="space-y-2">
-                {reasons.map((reason, index) => (
-                  <p key={index} className="text-gray-600">• {reason}</p>
-                ))}
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button
-                  onClick={() => setShowReasons(false)}
-                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-                >
-                  Close
                 </button>
               </div>
             </div>

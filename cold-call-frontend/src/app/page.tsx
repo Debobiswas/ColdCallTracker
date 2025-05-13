@@ -10,13 +10,17 @@ type Business = {
   address?: string;
   status: string;
   comment?: string;
+  region?: string;
+  industry?: string;
+  last_called_date?: string;
+  last_callback_date?: string;
 };
 
 export default function Dashboard() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [modalIdx, setModalIdx] = useState<number | null>(null);
-  const [form, setForm] = useState<Business>({ name: '', phone: '', address: '', status: 'tocall', comment: '' });
+  const [form, setForm] = useState<Business>({ name: '', phone: '', address: '', status: 'tocall', comment: '', region: '', industry: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
@@ -33,7 +37,8 @@ export default function Dashboard() {
   // Filter states
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
-    status: ''
+    status: '',
+    region: ''
   });
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [bulkMode, setBulkMode] = useState(false);
@@ -42,23 +47,29 @@ export default function Dashboard() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [businessHours, setBusinessHours] = useState<string[]>([]);
   const [expandedHours, setExpandedHours] = useState(false);
+  // State to track expanded industries
+  const [expandedIndustries, setExpandedIndustries] = useState<Record<string, Record<string, boolean>>>({});
 
   async function fetchBusinesses() {
     setLoading(true);
     try {
-      // Build filter query string
-      const filterParams = new URLSearchParams();
+      const params = new URLSearchParams();
       if (filters.status) {
-        // Clean the status: lowercase and remove any whitespace
         const cleanStatus = filters.status.toLowerCase().trim();
-        filterParams.append('status', cleanStatus);
+        params.append('status', cleanStatus);
       }
       
-      const url = filterParams.toString() 
-        ? `${API_URL}/filter?${filterParams.toString()}`
+      if (filters.region) {
+        const cleanRegion = filters.region.trim();
+        params.append('region', cleanRegion);
+      }
+      
+      const url = params.toString() 
+        ? `${API_URL}/filter?${params.toString()}`
         : API_URL;
       
       console.log('Fetching from URL:', url); // Debug log
+      console.log('Filter params:', JSON.stringify(filters)); // Debug log
       
       const res = await fetch(url);
       if (!res.ok) {
@@ -79,12 +90,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchBusinesses();
-  }, []);
+  }, [filters.status, filters.region]);
 
   function openModal(idx: number | null) {
     setModalIdx(idx);
     if (idx === null) {
-      setForm({ name: '', phone: '', address: '', status: 'tocall', comment: '' });
+      setForm({ name: '', phone: '', address: '', status: 'tocall', comment: '', region: '', industry: '' });
     } else {
       setForm(businesses[idx]);
     }
@@ -268,6 +279,8 @@ export default function Dashboard() {
         address: row.Address || '',
         status: (row.Status || '').replace(/\s/g, '').toLowerCase(),
         comment: row.Comment || '',
+        region: row.Region || '',
+        industry: row.Industry || ''
       })).filter(b => b.name && b.status);
       if (businesses.length === 0) {
         setBulkError('No valid businesses found.');
@@ -321,7 +334,7 @@ export default function Dashboard() {
 
   function clearFilters() {
     console.log('Clearing filters'); // Debug log
-    setFilters({ status: '' });
+    setFilters({ status: '', region: '' });
     fetchBusinesses();
   }
 
@@ -369,99 +382,92 @@ export default function Dashboard() {
     }
   };
 
-  // Helper to check if a business is open now
-  const isBusinessOpenNow = (hours: string[]): boolean => {
-    if (!hours || hours.length === 0) return false;
+  // Filtered businesses - no need to filter on client side anymore
+  const displayedBusinesses = businesses;
+
+  // Extract city from address
+  const extractCity = (address: string | undefined): string => {
+    if (!address) return "Unknown Location";
     
-    console.log("Checking hours:", hours);
+    // Try to extract city using common patterns in addresses
+    // Pattern: City, State/Province ZipCode
+    const cityMatch = address.match(/,\s*([^,]+),/);
+    if (cityMatch && cityMatch[1]) return cityMatch[1].trim();
     
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const now = new Date();
-    const today = days[now.getDay()];
-    const todayHours = hours.find(h => h.startsWith(today));
-    
-    if (!todayHours) {
-      console.log(`No hours found for ${today}`);
-      return false;
+    // Pattern: City, State/Province
+    const simpleMatch = address.match(/,\s*([^,]+)$/);
+    if (simpleMatch && simpleMatch[1]) {
+      // Remove postal/zip code if present
+      return simpleMatch[1].replace(/\s+\w\d\w\s+\d\w\d|\s+\d{5}(-\d{4})?/, '').trim();
     }
     
-    console.log("Today's hours:", todayHours);
-    
-    // Example: "Monday: 9:00 AM – 5:00 PM"
-    const match = todayHours.match(/: (.+)$/);
-    if (!match) {
-      console.log("Could not parse hours format");
-      return false;
+    // Fallback: Use the second-last part of the address split by commas
+    const parts = address.split(',');
+    if (parts.length >= 2) {
+      return parts[parts.length - 2].trim();
     }
     
-    const hoursString = match[1];
-    console.log("Hours string:", hoursString);
-    
-    // Check for "Closed" status
-    if (hoursString.trim().toLowerCase() === 'closed') {
-      console.log("Business is closed today");
-      return false;
-    }
-    
-    const periods = hoursString.split(',');
-    for (const period of periods) {
-      if (period.trim().toLowerCase() === 'closed') continue;
-      
-      // Look for time range with dash/hyphen/en dash
-      const timeParts = period.split(/[–—-]/).map(s => s.trim());
-      if (timeParts.length !== 2) {
-        console.log("Could not parse time range:", period);
-        continue;
-      }
-      
-      const [open, close] = timeParts;
-      if (!open || !close) continue;
-      
-      // Convert to 24h time
-      const parseTime = (t: string) => {
-        try {
-          const d = new Date(now);
-          const [time, ampm] = t.split(' ');
-          let [h, m] = (time || '').split(':').map(Number);
-          
-          if (isNaN(h)) {
-            console.log("Invalid hour:", time);
-            return null;
-          }
-          
-          if (ampm && ampm.toLowerCase() === 'pm' && h !== 12) h += 12;
-          if (ampm && ampm.toLowerCase() === 'am' && h === 12) h = 0;
-          
-          d.setHours(h, m || 0, 0, 0);
-          return d;
-        } catch (err) {
-          console.log("Error parsing time:", t, err);
-          return null;
-        }
-      };
-      
-      const openTime = parseTime(open);
-      const closeTime = parseTime(close);
-      
-      if (!openTime || !closeTime) {
-        console.log("Failed to parse open or close time");
-        continue;
-      }
-      
-      console.log(`Time now: ${now.toLocaleTimeString()}, Open: ${openTime.toLocaleTimeString()}, Close: ${closeTime.toLocaleTimeString()}`);
-      
-      if (now >= openTime && now <= closeTime) {
-        console.log("Business is currently open");
-        return true;
-      }
-    }
-    
-    console.log("Business is currently closed");
-    return false;
+    return "Unknown Location";
   };
 
-  // Filtered businesses
-  const displayedBusinesses = businesses;
+  // Get region from business, falling back to extracted city from address if region is not set
+  const getBusinessRegion = (business: Business): string => {
+    if (business.region) {
+      return business.region;
+    }
+    return extractCity(business.address);
+  };
+
+  // Get industry from business, defaulting to "Other" if not set
+  const getBusinessIndustry = (business: Business): string => {
+    return business.industry || "Other";
+  };
+
+  // Group businesses by region
+  const groupedBusinesses = displayedBusinesses.reduce((groups, business) => {
+    const region = getBusinessRegion(business);
+    if (!groups[region]) {
+      groups[region] = [];
+    }
+    groups[region].push(business);
+    return groups;
+  }, {} as Record<string, Business[]>);
+
+  // Group businesses by industry within each region
+  const groupedByIndustry = Object.entries(groupedBusinesses).reduce(
+    (regions, [region, businesses]) => {
+      regions[region] = businesses.reduce((industries, business) => {
+        const industry = getBusinessIndustry(business);
+        if (!industries[industry]) {
+          industries[industry] = [];
+        }
+        industries[industry].push(business);
+        return industries;
+      }, {} as Record<string, Business[]>);
+      return regions;
+    },
+    {} as Record<string, Record<string, Business[]>>
+  );
+
+  // Sort regions alphabetically
+  const sortedRegions = Object.keys(groupedBusinesses).sort();
+
+  // Get all available regions from the full business list
+  const availableRegions = [...new Set(businesses.map(b => getBusinessRegion(b)))].sort();
+
+  // Toggle industry expansion
+  const toggleIndustry = (region: string, industry: string) => {
+    setExpandedIndustries(prev => {
+      const regionExpanded = prev[region] || {};
+      return {
+        ...prev,
+        [region]: {
+          ...regionExpanded,
+          [industry]: !regionExpanded[industry]
+        }
+      };
+    });
+  };
 
   return (
     <div className="w-full mx-auto px-4">
@@ -507,40 +513,88 @@ export default function Dashboard() {
         </div>
       </div>
       {error && <div className="text-red-500 mb-4 whitespace-pre-line">{error}</div>}
-      <div className="bg-white rounded-xl shadow-2xl p-6 overflow-x-auto w-full">
+      <div className="space-y-8">
         {loading ? (
-          <div>Loading...</div>
+          <div className="bg-white rounded-xl shadow-2xl p-6">Loading...</div>
         ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-gray-500 text-sm">
-                <th className="py-2 px-2">
-                  <input type="checkbox" checked={selectedRows.length === displayedBusinesses.length && displayedBusinesses.length > 0} onChange={handleSelectAllRows} />
-                </th>
-                <th className="py-2 px-4 font-semibold">Name</th>
-                <th className="py-2 px-4 font-semibold">Phone</th>
-                <th className="py-2 px-4 font-semibold">Address</th>
-                <th className="py-2 px-4 font-semibold">Status</th>
-                <th className="py-2 px-4 font-semibold">Comment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayedBusinesses.map((b, idx) => (
-                <tr key={b.name + idx} className="border-t border-gray-200 hover:bg-gray-50 cursor-pointer" onClick={() => openModal(businesses.findIndex(biz => biz.name === b.name))}>
-                  <td className="py-2 px-2" onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedRows.includes(idx)} onChange={() => handleSelectRow(idx)} />
-                  </td>
-                  <td className="py-2 px-4 font-medium text-blue-700 hover:underline cursor-pointer" onClick={e => { e.stopPropagation(); handleRowClick(b); }}>
-                    {b.name}
-                  </td>
-                  <td className="py-2 px-4">{b.phone || ''}</td>
-                  <td className="py-2 px-4">{b.address || ''}</td>
-                  <td className={`py-2 px-4 capitalize ${getStatusColor(b.status)}`}>{b.status}</td>
-                  <td className="py-2 px-4">{(b.comment && b.comment.length > 25) ? b.comment.slice(0, 25) + '…' : (b.comment || '')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          sortedRegions.map(region => (
+            <div key={region} className="bg-white rounded-xl shadow-2xl p-6 overflow-x-auto w-full">
+              <h3 className="text-xl font-bold mb-4 text-gray-700 border-b pb-2">{region} ({groupedBusinesses[region].length})</h3>
+              
+              {/* Industries within this region */}
+              <div className="space-y-4">
+                {Object.entries(groupedByIndustry[region] || {}).sort(([a], [b]) => a.localeCompare(b)).map(([industry, businesses]) => (
+                  <div key={industry} className="border rounded-lg overflow-hidden">
+                    <button 
+                      className="w-full flex justify-between items-center p-3 bg-gray-50 hover:bg-gray-100 text-left font-medium"
+                      onClick={() => toggleIndustry(region, industry)}
+                    >
+                      <span>{industry} ({businesses.length})</span>
+                      <span className="text-gray-500">
+                        {expandedIndustries[region]?.[industry] ? '▼' : '▶'}
+                      </span>
+                    </button>
+                    
+                    {expandedIndustries[region]?.[industry] && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="text-gray-500 text-sm">
+                              <th className="py-2 px-2">
+                                <input 
+                                  type="checkbox" 
+                                  checked={businesses.every(b => 
+                                    selectedRows.includes(displayedBusinesses.findIndex(db => db.name === b.name))
+                                  )} 
+                                  onChange={() => {
+                                    // Toggle all in this industry group
+                                    const allIndices = businesses.map(b => 
+                                      displayedBusinesses.findIndex(db => db.name === b.name)
+                                    );
+                                    const allSelected = allIndices.every(idx => selectedRows.includes(idx));
+                                    
+                                    if (allSelected) {
+                                      // Deselect all in this industry
+                                      setSelectedRows(prev => prev.filter(idx => !allIndices.includes(idx)));
+                                    } else {
+                                      // Select all in this industry
+                                      setSelectedRows(prev => [...prev, ...allIndices.filter(idx => !prev.includes(idx))]);
+                                    }
+                                  }}
+                                />
+                              </th>
+                              <th className="py-2 px-4 font-semibold">Name</th>
+                              <th className="py-2 px-4 font-semibold">Phone</th>
+                              <th className="py-2 px-4 font-semibold">Address</th>
+                              <th className="py-2 px-4 font-semibold">Status</th>
+                              <th className="py-2 px-4 font-semibold">Comment</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {businesses.map((b) => {
+                              const idx = displayedBusinesses.findIndex(db => db.name === b.name);
+                              return (
+                                <tr key={b.name} className="border-t border-gray-200 hover:bg-gray-50 cursor-pointer" onClick={() => handleRowClick(b)}>
+                                  <td className="py-2 px-2" onClick={(e) => { e.stopPropagation(); handleSelectRow(idx); }}>
+                                    <input type="checkbox" checked={selectedRows.includes(idx)} readOnly />
+                                  </td>
+                                  <td className="py-2 px-4 font-medium text-blue-700 hover:underline">{b.name}</td>
+                                  <td className="py-2 px-4">{b.phone || '-'}</td>
+                                  <td className="py-2 px-4">{b.address || '-'}</td>
+                                  <td className={`py-2 px-4 ${getStatusColor(b.status)}`}>{b.status}</td>
+                                  <td className="py-2 px-4 max-w-xs truncate">{b.comment || '-'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
         )}
       </div>
       {/* Modal for Add/Edit Business */}
@@ -570,7 +624,7 @@ export default function Dashboard() {
             {bulkMode && modalIdx === null ? (
               <form onSubmit={handleBulkSubmit} className="flex flex-col gap-4">
                 <div className="mb-2 text-sm text-gray-500">Paste your CSV data below. Sample format:</div>
-                <pre className="bg-gray-100 rounded p-2 text-xs mb-4 w-full whitespace-pre-wrap">{`Name,Phone,Address,Status,Comment\nBusiness A,123-456-7890,123 Main St,called,Spoke with manager`}</pre>
+                <pre className="bg-gray-100 rounded p-2 text-xs mb-4 w-full whitespace-pre-wrap">{`Name,Phone,Address,Status,Comment,Region,Industry\nBusiness A,123-456-7890,123 Main St,called,Spoke with manager,Kingston,Restaurant`}</pre>
                 <textarea
                   className="border rounded px-3 py-2 h-32 resize-none"
                   value={bulkCSV}
@@ -589,6 +643,14 @@ export default function Dashboard() {
                 <input type="text" name="name" placeholder="Name" className="border rounded px-3 py-2" value={form.name} onChange={handleFormChange} required />
                 <input type="text" name="phone" placeholder="Phone" className="border rounded px-3 py-2" value={form.phone} onChange={handleFormChange} />
                 <input type="text" name="address" placeholder="Address" className="border rounded px-3 py-2" value={form.address} onChange={handleFormChange} />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Region (used for grouping)</label>
+                  <input type="text" name="region" placeholder="Region" className="border rounded px-3 py-2 w-full" value={form.region} onChange={handleFormChange} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+                  <input type="text" name="industry" placeholder="Industry" className="border rounded px-3 py-2 w-full" value={form.industry} onChange={handleFormChange} />
+                </div>
                 <select name="status" className="border rounded px-3 py-2" value={form.status} onChange={handleFormChange} required>
                   {['tocall', 'called', 'callback', 'dont_call'].map(opt => (
                     <option key={opt} value={opt}>{opt}</option>
@@ -613,6 +675,14 @@ export default function Dashboard() {
               <input type="text" name="name" placeholder="Name" className="border rounded px-3 py-2" value={selectedBusiness.name || ''} onChange={handleDetailsFormChange} required />
               <input type="text" name="phone" placeholder="Phone" className="border rounded px-3 py-2" value={selectedBusiness.phone || ''} onChange={handleDetailsFormChange} />
               <input type="text" name="address" placeholder="Address" className="border rounded px-3 py-2" value={selectedBusiness.address || ''} onChange={handleDetailsFormChange} />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Region (used for grouping)</label>
+                <input type="text" name="region" placeholder="Region" className="border rounded px-3 py-2 w-full" value={selectedBusiness.region || ''} onChange={handleDetailsFormChange} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+                <input type="text" name="industry" placeholder="Industry" className="border rounded px-3 py-2 w-full" value={selectedBusiness.industry || ''} onChange={handleDetailsFormChange} />
+              </div>
               <select name="status" className="border rounded px-3 py-2" value={selectedBusiness.status || ''} onChange={handleDetailsFormChange} required>
                 {['tocall', 'called', 'callback', 'dont_call', 'client'].map(opt => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -661,23 +731,53 @@ export default function Dashboard() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowFilterModal(false)}>
           <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => setShowFilterModal(false)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
-            <h3 className="text-xl font-bold mb-4">Filter by Status</h3>
-            <form onSubmit={(e) => { e.preventDefault(); fetchBusinesses(); setShowFilterModal(false); }} className="flex flex-col gap-4">
-              <select
-                name="status"
-                className="border rounded px-3 py-2"
-                value={filters.status}
-                onChange={handleFilterChange}
-              >
-                <option value="">All Statuses</option>
-                {['tocall', 'called', 'callback', 'dont_call', 'client'].map(opt => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
+            <h3 className="text-xl font-bold mb-4">Filter Businesses</h3>
+            <form onSubmit={(e) => { 
+              e.preventDefault(); 
+              console.log('Applying filters:', JSON.stringify(filters));
+              fetchBusinesses(); 
+              setShowFilterModal(false); 
+            }} className="flex flex-col gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  name="status"
+                  className="border rounded px-3 py-2 w-full"
+                  value={filters.status}
+                  onChange={handleFilterChange}
+                >
+                  <option value="">All Statuses</option>
+                  {['tocall', 'called', 'callback', 'dont_call', 'client'].map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {availableRegions.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+                  <select
+                    name="region"
+                    className="border rounded px-3 py-2 w-full"
+                    value={filters.region}
+                    onChange={handleFilterChange}
+                  >
+                    <option value="">All Regions</option>
+                    {availableRegions.map(region => (
+                      <option key={region} value={region}>{region}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={clearFilters}
+                  onClick={() => {
+                    console.log('Clearing filters');
+                    setFilters({ status: '', region: '' });
+                    setTimeout(() => fetchBusinesses(), 0);
+                  }}
                   className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-4 py-2 rounded"
                 >
                   Clear Filter
@@ -712,6 +812,14 @@ export default function Dashboard() {
               <div>
                 <span className="font-semibold">Address:</span>{' '}
                 {selectedBusiness.address || <span className="text-gray-400">Not available</span>}
+              </div>
+              <div>
+                <span className="font-semibold">Region (Grouping):</span>{' '}
+                {selectedBusiness.region || extractCity(selectedBusiness.address) || <span className="text-gray-400">Not available</span>}
+              </div>
+              <div>
+                <span className="font-semibold">Industry:</span>{' '}
+                {selectedBusiness.industry || <span className="text-gray-400">Not specified</span>}
               </div>
               <div>
                 <span className="font-semibold">Status:</span>{' '}
