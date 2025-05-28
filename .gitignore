@@ -73,4 +73,8 @@ next-env.d.ts
 # Ignore backup files
 *~ 
 *.bak
-*.tmp 
+*.tmp
+
+# Ignore Node and Next.js build files
+node_modules/
+.next/ 

@@ -9,9 +9,10 @@ type Business = {
   address?: string;
   status: string;
   comment?: string;
+  region?: string;
 };
 
-const emptyForm: Business = { name: '', phone: '', address: '', status: 'tocall', comment: '' };
+const emptyForm: Business = { name: '', phone: '', address: '', status: 'tocall', comment: '', region: '' };
 
 const statusOptions = ["tocall", "called", "callback", "dont_call"];
 
@@ -22,6 +23,7 @@ export default function BusinessesPage() {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
 
   async function fetchBusinesses() {
     setLoading(true);
@@ -97,16 +99,31 @@ export default function BusinessesPage() {
     }
   }
 
+  const filteredBusinesses = showOnlyWithPhone 
+    ? businesses.filter(b => b.phone && b.phone.trim() !== '')
+    : businesses;
+
   return (
     <div className="w-full mx-auto px-4">
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-3xl font-bold">Businesses</h2>
-        <button
-          className="bg-blue-500 hover:bg-blue-600 text-white font-semibold px-5 py-2 rounded-lg shadow transition"
-          onClick={() => openModal(null)}
-        >
-          + New Business
-        </button>
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-gray-700">
+            <input
+              type="checkbox"
+              checked={showOnlyWithPhone}
+              onChange={(e) => setShowOnlyWithPhone(e.target.checked)}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            Show only businesses with phone numbers
+          </label>
+          <button
+            className="bg-blue-500 hover:bg-blue-600 text-white font-semibold px-5 py-2 rounded-lg shadow transition"
+            onClick={() => openModal(null)}
+          >
+            + New Business
+          </button>
+        </div>
       </div>
       {error && <div className="text-red-500 mb-4">{error}</div>}
       <div className="bg-white rounded-xl shadow-2xl p-6 overflow-x-auto w-full">
@@ -119,17 +136,19 @@ export default function BusinessesPage() {
                 <th className="py-2 px-4 font-semibold">Name</th>
                 <th className="py-2 px-4 font-semibold">Phone</th>
                 <th className="py-2 px-4 font-semibold">Address</th>
+                <th className="py-2 px-4 font-semibold">Region</th>
                 <th className="py-2 px-4 font-semibold">Status</th>
                 <th className="py-2 px-4 font-semibold">Comment</th>
                 <th className="py-2 px-4 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {businesses.map((b, idx) => (
+              {filteredBusinesses.map((b, idx) => (
                 <tr key={b.name + idx} className="border-t border-gray-200 hover:bg-gray-50">
                   <td className="py-2 px-4 font-medium">{b.name}</td>
                   <td className="py-2 px-4">{b.phone || ''}</td>
                   <td className="py-2 px-4">{b.address || ''}</td>
+                  <td className="py-2 px-4">{b.region || ''}</td>
                   <td className="py-2 px-4 capitalize">{b.status}</td>
                   <td className="py-2 px-4">{b.comment || ''}</td>
                   <td className="py-2 px-4">
@@ -152,6 +171,7 @@ export default function BusinessesPage() {
               <input type="text" name="name" placeholder="Name" className="border rounded px-3 py-2" value={form.name} onChange={handleFormChange} required />
               <input type="text" name="phone" placeholder="Phone" className="border rounded px-3 py-2" value={form.phone} onChange={handleFormChange} />
               <input type="text" name="address" placeholder="Address" className="border rounded px-3 py-2" value={form.address} onChange={handleFormChange} />
+              <input type="text" name="region" placeholder="Region" className="border rounded px-3 py-2" value={form.region} onChange={handleFormChange} />
               <select name="status" className="border rounded px-3 py-2" value={form.status} onChange={handleFormChange} required>
                 {statusOptions.map(opt => (
                   <option key={opt} value={opt}>{opt}</option>

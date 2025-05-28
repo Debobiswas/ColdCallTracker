@@ -92,8 +92,8 @@ export default function BusinessLookupPage() {
           phone: result.phone || "",
           address: result.address || "",
           status: "tocall",
-          comment: "",
-          opening_hours: result.opening_hours || [],
+          comments: "",
+          hours: result.hours || ""
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -118,8 +118,8 @@ export default function BusinessLookupPage() {
             phone: result.phone || "",
             address: result.address || "",
             status: "tocall",
-            comment: "",
-            opening_hours: result.opening_hours || [],
+            comments: "",
+            hours: result.hours || ""
           }),
         });
       }
@@ -170,7 +170,7 @@ export default function BusinessLookupPage() {
                 <span className="font-semibold">Number of Results</span>
                 <input
                   type="number"
-                  max={30}
+                  min={1}
                   value={tempFilterLimit}
                   onChange={e => setTempFilterLimit(Number(e.target.value))}
                   className="border rounded px-3 py-2"
@@ -219,6 +219,9 @@ export default function BusinessLookupPage() {
       {error && <div className="text-red-500 mb-4">{error}</div>}
       {results.length > 0 && (
         <div className="space-y-4">
+          <div className="text-gray-600 mb-2">
+            Found {results.length} {results.length === 1 ? 'business' : 'businesses'}
+          </div>
           <button
             className="mb-4 bg-blue-800 hover:bg-blue-900 text-white font-semibold px-5 py-2 rounded-lg shadow transition w-full"
             onClick={handleAddAll}

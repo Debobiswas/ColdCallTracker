@@ -9,14 +9,15 @@ type Business = {
   phone?: string;
   address?: string;
   status: string;
-  comment?: string;
+  comments?: string;
+  hours?: string;
 };
 
 export default function Dashboard() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [modalIdx, setModalIdx] = useState<number | null>(null);
-  const [form, setForm] = useState<Business>({ name: '', phone: '', address: '', status: 'tocall', comment: '' });
+  const [form, setForm] = useState<Business>({ name: '', phone: '', address: '', status: 'tocall', comments: '', hours: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
@@ -33,29 +34,34 @@ export default function Dashboard() {
   // Filter states
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
-    status: ''
+    status: '',
+    region: ''
   });
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [bulkMode, setBulkMode] = useState(false);
   const [originalBusinessName, setOriginalBusinessName] = useState<string | null>(null);
   // Add state for business details modal
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [businessHours, setBusinessHours] = useState<string[]>([]);
-  const [expandedHours, setExpandedHours] = useState(false);
+  // State for expanded/collapsed cities
+  const [expandedCities, setExpandedCities] = useState<{ [city: string]: boolean }>({});
+  // Add state for hours modal
+  const [showHoursModal, setShowHoursModal] = useState(false);
+  const [hoursModalContent, setHoursModalContent] = useState<string>('');
 
   async function fetchBusinesses() {
     setLoading(true);
     try {
-      // Build filter query string
-      const filterParams = new URLSearchParams();
+      const params = new URLSearchParams();
       if (filters.status) {
-        // Clean the status: lowercase and remove any whitespace
         const cleanStatus = filters.status.toLowerCase().trim();
-        filterParams.append('status', cleanStatus);
+        params.append('status', cleanStatus);
+      }
+      if (filters.region) {
+        params.append('region', filters.region);
       }
       
-      const url = filterParams.toString() 
-        ? `${API_URL}/filter?${filterParams.toString()}`
+      const url = params.toString() 
+        ? `${API_URL}/filter?${params.toString()}`
         : API_URL;
       
       console.log('Fetching from URL:', url); // Debug log
@@ -79,12 +85,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchBusinesses();
-  }, []);
+  }, [filters.status, filters.region]);
 
   function openModal(idx: number | null) {
     setModalIdx(idx);
     if (idx === null) {
-      setForm({ name: '', phone: '', address: '', status: 'tocall', comment: '' });
+      setForm({ name: '', phone: '', address: '', status: 'tocall', comments: '', hours: '' });
     } else {
       setForm(businesses[idx]);
     }
@@ -139,12 +145,11 @@ export default function Dashboard() {
     }
   }
 
-  const handleRowClick = async (business: Business) => {
+  const handleRowClick = (business: Business) => {
     closeModal();
     setSelectedBusiness(business);
     setOriginalBusinessName(business.name);
     setShowDetailsModal(true);
-    await fetchBusinessDetails(business.name);
   };
 
   function closeDetailsModal() {
@@ -193,19 +198,10 @@ export default function Dashboard() {
     if (!selectedBusiness || !originalBusinessName) return;
     setError("");
     try {
-      // Extract and prepare data for backend
-      const commentToSave = selectedBusiness.comment || '';
-      // Create a clean payload with the direct comment (no processing)
-      const businessData = {
-        ...selectedBusiness,
-        comment: commentToSave // Directly use what the user typed
-      };
-      console.log('Saving business with comment:', commentToSave);
-      // Use the original name in the URL
       const res = await fetch(`${API_URL}/${encodeURIComponent(originalBusinessName)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(businessData),
+        body: JSON.stringify(selectedBusiness),
       });
       if (!res.ok) {
         const errText = await res.text();
@@ -267,7 +263,8 @@ export default function Dashboard() {
         phone: row.Phone || '',
         address: row.Address || '',
         status: (row.Status || '').replace(/\s/g, '').toLowerCase(),
-        comment: row.Comment || '',
+        comments: row.Comment || '',
+        hours: row.Hours || '',
       })).filter(b => b.name && b.status);
       if (businesses.length === 0) {
         setBulkError('No valid businesses found.');
@@ -321,7 +318,7 @@ export default function Dashboard() {
 
   function clearFilters() {
     console.log('Clearing filters'); // Debug log
-    setFilters({ status: '' });
+    setFilters({ status: '', region: '' });
     fetchBusinesses();
   }
 
@@ -348,12 +345,18 @@ export default function Dashboard() {
     fetchBusinesses();
   }
 
-  // Function to get today's hours
-  const getTodayHours = (hours: string[]) => {
+  // Helper to extract today's hours from the hours string
+  function getTodayHoursString(hours?: string): string {
+    if (!hours) return 'Not available';
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const today = days[new Date().getDay()];
-    return hours.find(h => h.startsWith(today)) || 'Closed today';
-  };
+    const regex = new RegExp(`${today}:\\s*([^|]*)`, 'i');
+    const match = hours.match(regex);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+    return 'Not available';
+  }
 
   // Function to fetch business details
   const fetchBusinessDetails = async (businessName: string) => {
@@ -362,7 +365,8 @@ export default function Dashboard() {
       if (!res.ok) throw new Error('Failed to fetch business details');
       const data = await res.json();
       if (data && data.length > 0) {
-        setBusinessHours(data[0].opening_hours || []);
+        const hours = data[0].opening_hours || [];
+        setForm(prev => ({ ...prev, hours }));
       }
     } catch (err) {
       console.error('Error fetching business details:', err);
@@ -463,6 +467,27 @@ export default function Dashboard() {
   // Filtered businesses
   const displayedBusinesses = businesses;
 
+  // Utility to extract city from address (assumes format: 'street, city, ...')
+  function extractCity(address?: string): string {
+    if (!address) return 'Unknown';
+    const parts = address.split(',').map(s => s.trim());
+    if (parts.length < 2) return 'Unknown';
+    // Assume city is the second part
+    return parts[1] || 'Unknown';
+  }
+
+  // Group businesses by city
+  const businessesByCity: { [city: string]: Business[] } = {};
+  displayedBusinesses.forEach(b => {
+    const city = extractCity(b.address);
+    if (!businessesByCity[city]) businessesByCity[city] = [];
+    businessesByCity[city].push(b);
+  });
+  const cityNames = Object.keys(businessesByCity).sort();
+
+  // Update the region filter options to use available cities
+  const regionOptions = ['', ...cityNames];
+
   return (
     <div className="w-full mx-auto px-4">
       {/* Counters - two boxes, each half the table width */}
@@ -483,7 +508,7 @@ export default function Dashboard() {
         </button>
       </div>
       <div className="flex items-center justify-between mb-8">
-        <h2 className="text-3xl font-bold">Businesses</h2>
+        <h2 className="text-3xl font-bold">Businesses <span className="text-gray-500 font-normal">({businesses.length})</span></h2>
         <div className="flex gap-2">
           <button
             className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-5 py-2 rounded-lg shadow transition"
@@ -511,36 +536,60 @@ export default function Dashboard() {
         {loading ? (
           <div>Loading...</div>
         ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-gray-500 text-sm">
-                <th className="py-2 px-2">
-                  <input type="checkbox" checked={selectedRows.length === displayedBusinesses.length && displayedBusinesses.length > 0} onChange={handleSelectAllRows} />
-                </th>
-                <th className="py-2 px-4 font-semibold">Name</th>
-                <th className="py-2 px-4 font-semibold">Phone</th>
-                <th className="py-2 px-4 font-semibold">Address</th>
-                <th className="py-2 px-4 font-semibold">Status</th>
-                <th className="py-2 px-4 font-semibold">Comment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayedBusinesses.map((b, idx) => (
-                <tr key={b.name + idx} className="border-t border-gray-200 hover:bg-gray-50 cursor-pointer" onClick={() => openModal(businesses.findIndex(biz => biz.name === b.name))}>
-                  <td className="py-2 px-2" onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedRows.includes(idx)} onChange={() => handleSelectRow(idx)} />
-                  </td>
-                  <td className="py-2 px-4 font-medium text-blue-700 hover:underline cursor-pointer" onClick={e => { e.stopPropagation(); handleRowClick(b); }}>
-                    {b.name}
-                  </td>
-                  <td className="py-2 px-4">{b.phone || ''}</td>
-                  <td className="py-2 px-4">{b.address || ''}</td>
-                  <td className={`py-2 px-4 capitalize ${getStatusColor(b.status)}`}>{b.status}</td>
-                  <td className="py-2 px-4">{(b.comment && b.comment.length > 25) ? b.comment.slice(0, 25) + '…' : (b.comment || '')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            {cityNames.length === 0 && <div>No businesses found.</div>}
+            {cityNames.map(city => (
+              <div key={city} className="mb-6 border rounded-lg shadow">
+                <button
+                  className="w-full text-left px-4 py-3 bg-gray-100 font-bold text-lg flex justify-between items-center rounded-t-lg focus:outline-none"
+                  onClick={() => setExpandedCities(prev => ({ ...prev, [city]: !prev[city] }))}
+                >
+                  <span>{city} <span className="text-gray-500 font-normal">({businessesByCity[city].length})</span></span>
+                  <span>{expandedCities[city] ? '▲' : '▼'}</span>
+                </button>
+                {expandedCities[city] && (
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="text-gray-500 text-sm">
+                        <th className="py-2 px-2">
+                          {/* No select all per city for now */}
+                        </th>
+                        <th className="py-2 px-4 font-semibold">Name</th>
+                        <th className="py-2 px-4 font-semibold">Phone</th>
+                        <th className="py-2 px-4 font-semibold">Address</th>
+                        <th className="py-2 px-4 font-semibold">Hours</th>
+                        <th className="py-2 px-4 font-semibold">Status</th>
+                        <th className="py-2 px-4 font-semibold">Comment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {businessesByCity[city].map((b, idx) => {
+                        // Find the global index for selection and modal
+                        const globalIdx = businesses.findIndex(biz => biz.name === b.name);
+                        return (
+                          <tr key={b.name + idx} className="border-t border-gray-200 hover:bg-gray-50 cursor-pointer" onClick={() => openModal(globalIdx)}>
+                            <td className="py-2 px-2" onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" checked={selectedRows.includes(globalIdx)} onChange={() => handleSelectRow(globalIdx)} />
+                            </td>
+                            <td className="py-2 px-4 font-medium text-blue-700 hover:underline cursor-pointer" onClick={e => { e.stopPropagation(); handleRowClick(b); }}>
+                              {b.name}
+                            </td>
+                            <td className="py-2 px-4">{b.phone || ''}</td>
+                            <td className="py-2 px-4">{b.address || ''}</td>
+                            <td className="py-2 px-4 text-gray-500 cursor-pointer" onClick={e => { e.stopPropagation(); setHoursModalContent(b.hours || 'Not available'); setShowHoursModal(true); }}>
+                              {b.hours ? getTodayHoursString(b.hours) : 'Not available'}
+                            </td>
+                            <td className={`py-2 px-4 capitalize ${getStatusColor(b.status)}`}>{b.status}</td>
+                            <td className="py-2 px-4">{(b.comments && b.comments.length > 25) ? b.comments.slice(0, 25) + '…' : (b.comments || '')}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
       {/* Modal for Add/Edit Business */}
@@ -570,7 +619,7 @@ export default function Dashboard() {
             {bulkMode && modalIdx === null ? (
               <form onSubmit={handleBulkSubmit} className="flex flex-col gap-4">
                 <div className="mb-2 text-sm text-gray-500">Paste your CSV data below. Sample format:</div>
-                <pre className="bg-gray-100 rounded p-2 text-xs mb-4 w-full whitespace-pre-wrap">{`Name,Phone,Address,Status,Comment\nBusiness A,123-456-7890,123 Main St,called,Spoke with manager`}</pre>
+                <pre className="bg-gray-100 rounded p-2 text-xs mb-4 w-full whitespace-pre-wrap">{`Name,Phone,Address,Status,Comment,Hours\nBusiness A,123-456-7890,123 Main St,called,Spoke with manager,Monday: 9:00 AM – 5:00 PM`}</pre>
                 <textarea
                   className="border rounded px-3 py-2 h-32 resize-none"
                   value={bulkCSV}
@@ -589,12 +638,13 @@ export default function Dashboard() {
                 <input type="text" name="name" placeholder="Name" className="border rounded px-3 py-2" value={form.name} onChange={handleFormChange} required />
                 <input type="text" name="phone" placeholder="Phone" className="border rounded px-3 py-2" value={form.phone} onChange={handleFormChange} />
                 <input type="text" name="address" placeholder="Address" className="border rounded px-3 py-2" value={form.address} onChange={handleFormChange} />
+                <input type="text" name="hours" placeholder="Hours" className="border rounded px-3 py-2 bg-gray-100" value={form.hours} readOnly />
                 <select name="status" className="border rounded px-3 py-2" value={form.status} onChange={handleFormChange} required>
                   {['tocall', 'called', 'callback', 'dont_call'].map(opt => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
-                <input type="text" name="comment" placeholder="Comment" className="border rounded px-3 py-2" value={form.comment} onChange={handleFormChange} />
+                <input type="text" name="comments" placeholder="Comment" className="border rounded px-3 py-2" value={form.comments} onChange={handleFormChange} />
                 <div className="flex gap-4 mt-2">
                   <button type="submit" className="bg-blue-500 hover:bg-blue-600 text-white font-semibold px-5 py-2 rounded-lg shadow transition">Save</button>
                   <button type="button" onClick={closeModal} className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-5 py-2 rounded-lg shadow transition">Cancel</button>
@@ -613,16 +663,17 @@ export default function Dashboard() {
               <input type="text" name="name" placeholder="Name" className="border rounded px-3 py-2" value={selectedBusiness.name || ''} onChange={handleDetailsFormChange} required />
               <input type="text" name="phone" placeholder="Phone" className="border rounded px-3 py-2" value={selectedBusiness.phone || ''} onChange={handleDetailsFormChange} />
               <input type="text" name="address" placeholder="Address" className="border rounded px-3 py-2" value={selectedBusiness.address || ''} onChange={handleDetailsFormChange} />
+              <input type="text" name="hours" placeholder="Hours" className="border rounded px-3 py-2 bg-gray-100" value={selectedBusiness.hours || ''} readOnly />
               <select name="status" className="border rounded px-3 py-2" value={selectedBusiness.status || ''} onChange={handleDetailsFormChange} required>
                 {['tocall', 'called', 'callback', 'dont_call', 'client'].map(opt => (
                   <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
               <textarea
-                name="comment"
+                name="comments"
                 placeholder="Comment"
                 className={`border rounded px-3 py-2 transition-all duration-150 ${commentFocused ? 'h-32' : 'h-10'} resize-none`}
-                value={selectedBusiness.comment || ''}
+                value={selectedBusiness.comments || ''}
                 onChange={handleDetailsFormChange}
                 onFocus={() => setCommentFocused(true)}
                 onBlur={() => setCommentFocused(false)}
@@ -661,7 +712,7 @@ export default function Dashboard() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowFilterModal(false)}>
           <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => setShowFilterModal(false)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
-            <h3 className="text-xl font-bold mb-4">Filter by Status</h3>
+            <h3 className="text-xl font-bold mb-4">Filter by Status and Region</h3>
             <form onSubmit={(e) => { e.preventDefault(); fetchBusinesses(); setShowFilterModal(false); }} className="flex flex-col gap-4">
               <select
                 name="status"
@@ -672,6 +723,16 @@ export default function Dashboard() {
                 <option value="">All Statuses</option>
                 {['tocall', 'called', 'callback', 'dont_call', 'client'].map(opt => (
                   <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              <select
+                name="region"
+                className="border rounded px-3 py-2"
+                value={filters.region}
+                onChange={handleFilterChange}
+              >
+                {regionOptions.map(opt => (
+                  <option key={opt} value={opt}>{opt || 'All Regions'}</option>
                 ))}
               </select>
               <div className="flex gap-2">
@@ -719,31 +780,10 @@ export default function Dashboard() {
                   {selectedBusiness.status}
                 </span>
               </div>
-              {selectedBusiness.comment && (
+              {selectedBusiness.comments && (
                 <div>
                   <span className="font-semibold">Comment:</span>{' '}
-                  {selectedBusiness.comment}
-                </div>
-              )}
-              {businessHours.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">Hours Today:</span>
-                    <span className="text-gray-700">{getTodayHours(businessHours)}</span>
-                    <button
-                      onClick={() => setExpandedHours(!expandedHours)}
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      {expandedHours ? 'Show less' : 'Show all hours'}
-                    </button>
-                  </div>
-                  {expandedHours && (
-                    <ul className="list-disc list-inside mt-2 text-sm">
-                      {businessHours.map((hours, i) => (
-                        <li key={i} className="text-gray-700">{hours}</li>
-                      ))}
-                    </ul>
-                  )}
+                  {selectedBusiness.comments}
                 </div>
               )}
               <div className="flex justify-end gap-4 mt-6">
@@ -754,6 +794,18 @@ export default function Dashboard() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showHoursModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowHoursModal(false)}>
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowHoursModal(false)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
+            <h3 className="text-xl font-bold mb-4">Business Hours</h3>
+            <div className="whitespace-pre-line text-gray-700">{hoursModalContent.split('|').map((line, idx) => <div key={idx}>{line.trim()}</div>)}</div>
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setShowHoursModal(false)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-2 rounded-lg shadow transition">Close</button>
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@ import call_tracker as ct
 import os
 import traceback
 from datetime import datetime
+from itertools import islice
 
 app = FastAPI()
 
@@ -24,26 +25,35 @@ VALID_STATUSES = ['tocall', 'called', 'callback', 'dont_call', 'client']
 
 class Business(BaseModel):
     name: str
-    phone: Optional[str] = None
-    address: Optional[str] = None
-    status: str
-    comment: Optional[str] = None
-    last_called_date: Optional[str] = None
-    last_callback_date: Optional[str] = None
+    phone: str
+    address: str
+    website: str = ""
+    status: str = "Not Called"
+    comments: str = ""
+    google_maps_url: str = ""
+    region: str = ""
+    hours: str = ""
 
 class BusinessUpdate(BaseModel):
-    status: Optional[str] = None
-    comment: Optional[str] = None
     name: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    website: Optional[str] = None
+    status: Optional[str] = None
+    comments: Optional[str] = None
+    region: Optional[str] = None
+    hours: Optional[str] = None
 
 class NewBusiness(BaseModel):
     name: str
-    phone: Optional[str] = None
-    address: Optional[str] = None
-    status: str = "tocall"
-    comment: Optional[str] = None
+    phone: str
+    address: str
+    website: str = ""
+    status: str = "Not Called"
+    comments: str = ""
+    google_maps_url: str = ""
+    region: str = ""
+    hours: str = ""
 
 class BulkBusinessRequest(BaseModel):
     businesses: List[NewBusiness]
@@ -81,6 +91,7 @@ class BusinessFilter(BaseModel):
     status: Optional[str] = None
 
 CLIENTS_FILE = "clients.xlsx"
+ENV_FILE = ".env"
 
 def load_clients():
     if not os.path.exists(CLIENTS_FILE):
@@ -91,20 +102,65 @@ def load_clients():
 def save_clients(df):
     df.to_excel(CLIENTS_FILE, index=False)
 
+def read_env_key():
+    if not os.path.exists(ENV_FILE):
+        return None
+    with open(ENV_FILE, "r") as f:
+        for line in f:
+            if line.startswith("GOOGLE_API_KEY="):
+                return line.strip().split("=", 1)[1]
+    return None
+
+def write_env_key(new_key):
+    lines = []
+    found = False
+    if os.path.exists(ENV_FILE):
+        with open(ENV_FILE, "r") as f:
+            for line in f:
+                if line.startswith("GOOGLE_API_KEY="):
+                    lines.append(f"GOOGLE_API_KEY={new_key}\n")
+                    found = True
+                else:
+                    lines.append(line)
+    if not found:
+        lines.append(f"GOOGLE_API_KEY={new_key}\n")
+    with open(ENV_FILE, "w") as f:
+        f.writelines(lines)
+
+@app.get("/api/admin/google-api-key")
+def get_env_api_key():
+    key = read_env_key()
+    if not key:
+        return {"key": None}
+    return {"key": key[:6] + "..." + key[-4:]}
+
+@app.post("/api/admin/google-api-key")
+def set_env_api_key(data: dict):
+    key = data.get("key")
+    if not key or not isinstance(key, str):
+        raise HTTPException(status_code=400, detail="Invalid key")
+    write_env_key(key)
+    ct.initialize_gmaps()
+    return {"message": "API key updated"}
+
 @app.get("/api/businesses", response_model=List[Business])
 async def get_all_businesses():
     try:
         df = ct.load_data(ct.EXCEL_FILE)
+        
+        # Add Hours column if it doesn't exist
+        if 'Hours' not in df.columns:
+            df['Hours'] = ''
+            
         businesses = []
         for _, row in df.iterrows():
             businesses.append(Business(
                 name=str(row['Name']),
-                phone=None if pd.isna(row['Number']) else str(row['Number']),
-                address=None if pd.isna(row['Address']) else str(row['Address']),
+                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
+                address=str(row['Address']) if not pd.isna(row['Address']) else "",
                 status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
-                comment=None if pd.isna(row['Comments']) else str(row['Comments']),
-                last_called_date=None if pd.isna(row['LastCalledDate']) else str(row['LastCalledDate']),
-                last_callback_date=None if pd.isna(row['LastCallbackDate']) else str(row['LastCallbackDate'])
+                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else ""
             ))
         return businesses
     except Exception as e:
@@ -118,17 +174,21 @@ async def get_businesses_by_status(status: str):
     
     try:
         df = ct.load_data(ct.EXCEL_FILE)
+        
+        # Add Hours column if it doesn't exist
+        if 'Hours' not in df.columns:
+            df['Hours'] = ''
+            
         filtered_df = df[df['Status'].str.lower() == status.lower()]
         businesses = []
         for _, row in filtered_df.iterrows():
             businesses.append(Business(
                 name=str(row['Name']),
-                phone=None if pd.isna(row['Number']) else str(row['Number']),
-                address=None if pd.isna(row['Address']) else str(row['Address']),
+                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
+                address=str(row['Address']) if not pd.isna(row['Address']) else "",
                 status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
-                comment=None if pd.isna(row['Comments']) else str(row['Comments']),
-                last_called_date=None if pd.isna(row['LastCalledDate']) else str(row['LastCalledDate']),
-                last_callback_date=None if pd.isna(row['LastCallbackDate']) else str(row['LastCallbackDate'])
+                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else ""
             ))
         return businesses
     except Exception as e:
@@ -136,49 +196,43 @@ async def get_businesses_by_status(status: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/businesses/filter", response_model=List[Business])
-async def filter_businesses(status: Optional[str] = Query(None)):
+async def filter_businesses(
+    status: Optional[str] = Query(None),
+    region: Optional[str] = Query(None)
+):
     try:
-        # Always print this to confirm the endpoint is being hit
         print("\n\n===== FILTER ENDPOINT HIT =====")
-        print(f"Query parameter 'status': {status}")
+        print(f"Query parameters - status: {status}, region: {region}")
 
         df = ct.load_data(ct.EXCEL_FILE)
+        # Add Hours column if it doesn't exist
+        if 'Hours' not in df.columns:
+            df['Hours'] = ''
+        # Add Region column if it doesn't exist
+        if 'Region' not in df.columns:
+            df['Region'] = ''
         print(f"Loaded {len(df)} businesses from Excel")
-        print(f"Status column values: {df['Status'].unique()}")
-        
-        # Skip validation for now - just do the filtering with very relaxed matching
+        # Apply filters
         if status and status.strip():
             status_lower = status.strip().lower()
-            print(f"Looking for businesses with status matching: '{status_lower}'")
-            
-            # Create a lowercase version of status for comparison
             df['status_lower'] = df['Status'].astype(str).str.lower().str.strip()
-            
-            # Print some rows for debugging
-            print("First few rows of Excel data:")
-            print(df[['Name', 'Status', 'status_lower']].head())
-            
-            # Filter with exact matching
-            filtered_df = df[df['status_lower'] == status_lower]
-            
-            print(f"Found {len(filtered_df)} businesses matching '{status_lower}'")
-        else:
-            filtered_df = df
-            print("No status filter applied, returning all businesses")
-        
+            df = df[df['status_lower'] == status_lower]
+        if region and region.strip():
+            region_lower = region.strip().lower()
+            df['region_lower'] = df['Region'].astype(str).str.lower().str.strip()
+            df = df[df['region_lower'] == region_lower]
         # Prepare the response
         businesses = []
-        for _, row in filtered_df.iterrows():
+        for _, row in df.iterrows():
             businesses.append(Business(
                 name=str(row['Name']),
-                phone=None if pd.isna(row['Number']) else str(row['Number']),
-                address=None if pd.isna(row['Address']) else str(row['Address']),
+                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
+                address=str(row['Address']) if not pd.isna(row['Address']) else "",
                 status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
-                comment=None if pd.isna(row['Comments']) else str(row['Comments']),
-                last_called_date=None if pd.isna(row['LastCalledDate']) else str(row['LastCalledDate']),
-                last_callback_date=None if pd.isna(row['LastCallbackDate']) else str(row['LastCallbackDate'])
+                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
+                region=str(row['Region']) if not pd.isna(row['Region']) else ""
             ))
-        
         print(f"Returning {len(businesses)} businesses")
         print("===== END FILTER ENDPOINT =====\n\n")
         return businesses
@@ -219,44 +273,8 @@ async def update_business(name: str, update: BusinessUpdate):
             elif update.status == "client":
                 df.loc[row_mask, 'Status'] = 'client'
 
-        if update.comment is not None:
-            print("\n\n===== COMMENT UPDATE DEBUGGING =====")
-            print(f"1. Business name: '{name}'")
-            print(f"2. Comment from frontend: '{update.comment}'")
-            
-            # Ensure Comments column is properly set up
-            if 'Comments' not in df.columns:
-                print("WARNING: Comments column not found, creating it")
-                df['Comments'] = ""
-            
-            # Get the original comment value
-            original_comment = "Empty" 
-            if row_mask.any():
-                try:
-                    original_comment = df.loc[row_mask, 'Comments'].values[0]
-                    print(f"3. Original comment in Excel: '{original_comment}'")
-                except Exception as e:
-                    print(f"ERROR reading original comment: {str(e)}")
-            else:
-                print("3. No matching row found!")
-            
-            # Direct assignment of comment - NO TIMESTAMP, NO APPEND
-            try:
-                # Always use the EXACT comment value from the update, no transformations
-                df.loc[row_mask, 'Comments'] = update.comment
-                print(f"4. Set comment to: '{update.comment}'")
-                
-                # Verify the comment was set correctly
-                if row_mask.any():
-                    try:
-                        new_comment = df.loc[row_mask, 'Comments'].values[0]
-                        print(f"5. Updated comment in DataFrame: '{new_comment}'")
-                    except Exception as e:
-                        print(f"ERROR reading updated comment: {str(e)}")
-            except Exception as e:
-                print(f"ERROR setting comment: {str(e)}")
-            
-            print("===== END COMMENT DEBUGGING =====\n\n")
+        if update.comments is not None:
+            df.loc[row_mask, 'Comments'] = update.comments
 
         if update.name is not None:
             df.loc[row_mask, 'Name'] = update.name
@@ -267,11 +285,10 @@ async def update_business(name: str, update: BusinessUpdate):
         if update.address is not None:
             df.loc[row_mask, 'Address'] = update.address
 
+        if update.hours is not None:
+            df.loc[row_mask, 'Hours'] = update.hours
+
         df = df.drop(columns=['Name_clean'])
-        
-        # Use the specialized direct save function for the API
-        # This avoids all timestamp and appending logic in the original save_to_excel
-        print("Using API direct save to avoid comment processing")
         ct.api_direct_save(df)
             
         return {"message": "Business updated successfully"}
@@ -299,7 +316,8 @@ async def add_business(business: NewBusiness):
             'Number': [business.phone],
             'Address': [business.address],
             'Status': [business.status],
-            'Comments': [business.comment]
+            'Comments': [business.comments],
+            'Hours': [business.hours]
         })
         
         df = pd.concat([df, new_row], ignore_index=True)
@@ -336,7 +354,8 @@ async def add_businesses_bulk(request: BulkBusinessRequest):
                     'Number': [business.phone],
                     'Address': [business.address],
                     'Status': [business.status],
-                    'Comments': [business.comment]
+                    'Comments': [business.comments],
+                    'Hours': [business.hours]
                 })
 
                 df = pd.concat([df, new_row], ignore_index=True)
@@ -534,94 +553,122 @@ async def delete_client(name: str):
 @app.get("/api/businesses/lookup")
 async def lookup_business(name: str = Query(..., description="Business name to look up")):
     try:
+        # Get basic details
         phone, address = ct.get_business_details_online(name)
-        return {"name": name, "phone": phone, "address": address}
+        
+        # Get hours from Google Places API
+        try:
+            print(f"\n🔍 Making Places API call for business lookup: {name}")
+            results = ct.gmaps.places(
+                query=name,
+                type='business'
+            )
+            
+            hours = ""
+            if results['status'] == 'OK' and results.get('results'):
+                place_id = results['results'][0]['place_id']
+                details = ct.gmaps.place(
+                    place_id=place_id,
+                    fields=['opening_hours']
+                )
+                
+                if 'opening_hours' in details.get('result', {}) and 'weekday_text' in details['result']['opening_hours']:
+                    hours = ' | '.join(details['result']['opening_hours']['weekday_text'])
+            
+            return {
+                "name": name,
+                "phone": phone,
+                "address": address,
+                "hours": hours
+            }
+        except Exception as e:
+            print(f"Error fetching hours: {str(e)}")
+            return {
+                "name": name,
+                "phone": phone,
+                "address": address,
+                "hours": ""
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/businesses/search")
 async def search_businesses(
     query: str = Query(..., description="Search query for businesses"),
-    limit: int = Query(15, le=30, description="Number of results to return (max 30)"),
+    limit: int = Query(15, gt=0, description="Number of results to return"),
     no_website: bool = Query(False, description="Only include results without a website"),
     initial_radius: int = Query(1000, description="Initial search radius in meters"),
-    max_radius: int = Query(50000, description="Maximum search radius in meters")
+    max_radius: int = Query(50000, description="Maximum search radius in meters"),
+    keywords: Optional[str] = Query(None, description="Comma-separated list of keywords to prepend to the query (e.g. 'restaurant,cafe,bar')")
 ):
     try:
-        output = []
-        current_radius = initial_radius
-        seen_places = set()  # Track unique places by place_id
-        page_token = None  # For pagination
-        search_attempts = 0  # Track number of search attempts
-        max_attempts = 5  # Maximum number of search attempts to prevent infinite loops
+        # Prepare keywords
+        if keywords:
+            keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
+        else:
+            keyword_list = ['restaurant', 'cafe', 'bar', 'bistro', 'diner']
 
-        while len(output) < limit and current_radius <= max_radius and search_attempts < max_attempts:
-            # Use Google Places API to search for businesses with radius
-            search_params = {
-                'query': query,
-                'radius': current_radius
-            }
-            if page_token:
-                search_params['page_token'] = page_token
-
-            results = ct.gmaps.places(**search_params)
-
-            if results['status'] != 'OK' or not results.get('results'):
-                # If no results found or reached end of results, increase radius and reset pagination
-                current_radius *= 2
-                page_token = None
-                search_attempts += 1
-                continue
-
-            # Process results
-            for place in results['results']:
-                if len(output) >= limit:
-                    break
-
-                place_id = place['place_id']
-                
-                # Skip if we've already seen this place
-                if place_id in seen_places:
-                    continue
-                seen_places.add(place_id)
-
+        all_results = []
+        seen = set()
+        for keyword in keyword_list:
+            search_query = f"{keyword} {query}".strip()
+            page_token = None
+            while len(all_results) < limit:
                 try:
-                    details = ct.gmaps.place(
-                        place_id=place_id, 
-                        fields=['name', 'formatted_phone_number', 'formatted_address', 'website', 'opening_hours', 'url']
+                    print(f"\n🔍 Making Places API call for search: {search_query} (page_token: {page_token})")
+                    results = ct.gmaps.places(
+                        query=search_query,
+                        type='business',
+                        page_token=page_token
                     )
-                    info = details.get('result', {})
-                    
-                    # If no_website is True, skip if website exists
-                    if no_website and info.get('website'):
-                        continue
-
-                    output.append({
-                        'name': info.get('name', place.get('name', '')),
-                        'phone': info.get('formatted_phone_number', ''),
-                        'address': info.get('formatted_address', ''),
-                        'website': info.get('website', ''),
-                        'opening_hours': info.get('opening_hours', {}).get('weekday_text', []),
-                        'google_maps_url': info.get('url', ''),
-                    })
-                except Exception as detail_error:
-                    print(f"Error fetching details for place {place_id}: {str(detail_error)}")
-                    continue
-
-            # Check if there are more results available
-            page_token = results.get('next_page_token')
-            if not page_token:
-                # If no more pages, increase radius and reset pagination
-                current_radius *= 2
-                search_attempts += 1
-
-            # Add a small delay if we have a next page token (required by Google Places API)
-            if page_token:
-                import time
-                time.sleep(2)
-
-        # Return the results we have (might be less than limit if we hit max_radius)
-        return output[:min(limit, len(output))]
+                    if results['status'] != 'OK' or not results.get('results'):
+                        break
+                    for place in results.get('results', []):
+                        place_id = place['place_id']
+                        try:
+                            print(f"🔍 Making Place Details API call for: {place.get('name', '')}")
+                            details = ct.gmaps.place(
+                                place_id=place_id, 
+                                fields=['name', 'formatted_phone_number', 'formatted_address', 'website', 'url', 'opening_hours']
+                            )
+                            info = details.get('result', {})
+                            # If no_website is True, skip if website exists
+                            if no_website and info.get('website'):
+                                continue
+                            # Format hours into a single string
+                            hours = []
+                            if 'opening_hours' in info and 'weekday_text' in info['opening_hours']:
+                                hours = info['opening_hours']['weekday_text']
+                            hours_str = ' | '.join(hours) if hours else ''
+                            key = (info.get('name', place.get('name', '')).strip().lower(), info.get('formatted_address', '').strip().lower())
+                            if key not in seen:
+                                seen.add(key)
+                                all_results.append({
+                                    'name': info.get('name', place.get('name', '')),
+                                    'phone': info.get('formatted_phone_number', ''),
+                                    'address': info.get('formatted_address', ''),
+                                    'website': info.get('website', ''),
+                                    'google_maps_url': info.get('url', ''),
+                                    'hours': hours_str
+                                })
+                                if len(all_results) >= limit:
+                                    break
+                        except Exception as detail_error:
+                            print(f"Error fetching details for place {place_id}: {str(detail_error)}")
+                            continue
+                    if len(all_results) >= limit:
+                        break
+                    page_token = results.get('next_page_token')
+                    if not page_token:
+                        break
+                    import time
+                    time.sleep(2)
+                except Exception as search_error:
+                    print(f"Error in search attempt: {str(search_error)}")
+                    break
+            if len(all_results) >= limit:
+                break
+        return all_results[:limit]
     except Exception as e:
         print(f"Search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

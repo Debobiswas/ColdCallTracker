@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import googlemaps
 from tabulate import tabulate
+from dotenv import load_dotenv
 
 #Voice recognition
 import speech_recognition as sr
@@ -13,8 +14,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
 
-# Replace this with your actual Google API Key
-GOOGLE_API_KEY = "AIzaSyBTxZR3sCSyDS1UaMu-LvhHbwhx6R_qZQ4"
+# Load environment variables
+load_dotenv()
+
+# Get Google API Key from environment variable
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable is not set")
 
 EXCEL_FILE = "places_to_call.xlsx"
 
@@ -92,6 +98,19 @@ def speak(text):
 
 # Initialize Google Maps API client
 gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
+
+gmaps = None
+
+def initialize_gmaps():
+    global gmaps
+    key = os.getenv('GOOGLE_API_KEY')
+    if key:
+        gmaps = googlemaps.Client(key=key)
+    else:
+        gmaps = None
+
+# Initialize on startup
+initialize_gmaps()
 
 def create_empty_excel():
     """Create an empty Excel file with the required columns if it doesn't exist."""
