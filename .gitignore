@@ -33,6 +33,7 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+*.env
 
 # IDE
 .idea/
@@ -45,22 +46,46 @@ yarn-error.log*
 Thumbs.db
 
 # Project specific
+# Excel files - all Excel files are excluded for privacy
 *.xlsx
 *.xls
 *.csv
+# Allow sample data file for GitHub demonstration
+!sample_places_to_call.xlsx
 *.log
+*.json
+
+# Test files and scripts
+test_*.py
+*_test.py
+test_*.js
+*_test.js
+test_*.ts
+*_test.ts
+fix_autodialer.py
+autodialer_comprehensive_fix.py
+clean_comments.py
+create_excel.py
+create_sample_data.py
+status_normalizer.py
+test_api.py
+call_tracker.py
+check-excel.py
+check-business.py
+export-to-excel.py
+update_cafe_industry.py
+update-cafe-industry.js
+phone-server-debug.js
+phone-server.js
 
 # Python cache and test artifacts
 .pytest_cache/
 *.pyc
 
-# Data files (Excel, CSV, etc.)
-*.xlsx
-*.xls
-*.csv
-
 # Environment and secrets
 *.pem
+*.key
+*.cert
 
 # Vercel/Netlify/Deployment
 .vercel
@@ -77,4 +102,25 @@ next-env.d.ts
 
 # Ignore Node and Next.js build files
 node_modules/
-.next/ 
+.next/
+
+# === Custom: Unnecessary files and directories for cleanup ===
+# Python cache and test artifacts
+__pycache__/
+.pytest_cache/
+venv/
+
+# Old/unused project attempts
+mobile-app/
+backend/
+src/
+
+# Backup and extra data files
+backup_*.xlsx
+places_to_call_backup.xlsx
+places_to_call_good.xlsx
+*_backup.xlsx
+*_export_*.xlsx
+dataset_crawler-*.json
+
+# End custom cleanup section 
