@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 export default function BusinessLookupPage() {
   const [query, setQuery] = useState("");
@@ -10,17 +10,36 @@ export default function BusinessLookupPage() {
   const [addedAll, setAddedAll] = useState(false);
   // Filter modal state
   const [showFilter, setShowFilter] = useState(false);
-  const [filterLimit, setFilterLimit] = useState(15);
+  const [filterLimit, setFilterLimit] = useState(60);
   const [filterNoWebsite, setFilterNoWebsite] = useState(false);
   const [initialRadius, setInitialRadius] = useState(1000);
   const [maxRadius, setMaxRadius] = useState(50000);
+  const [keywords, setKeywords] = useState("restaurant, cafe, Tavern, coffee, bistro, diner");
   // Temporary state for modal
   const [tempFilterLimit, setTempFilterLimit] = useState(filterLimit);
   const [tempFilterNoWebsite, setTempFilterNoWebsite] = useState(filterNoWebsite);
   const [tempInitialRadius, setTempInitialRadius] = useState(initialRadius);
   const [tempMaxRadius, setTempMaxRadius] = useState(maxRadius);
+  const [tempKeywords, setTempKeywords] = useState(keywords);
   // State for expanded hours
   const [expandedHours, setExpandedHours] = useState<{ [key: string]: boolean }>({});
+  const [allIndustries, setAllIndustries] = useState<string[]>(["Restaurant"]);
+  const [showIndustryModal, setShowIndustryModal] = useState(false);
+  const [industryInput, setIndustryInput] = useState("");
+  const [industryDropdown, setIndustryDropdown] = useState("");
+  const [pendingAddIdx, setPendingAddIdx] = useState<number | null>(null);
+
+  // Fetch all businesses to get industries
+  useEffect(() => {
+    fetch("http://localhost:8001/api/businesses")
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const inds = Array.from(new Set(data.map((b: any) => b.industry || "Restaurant")));
+          setAllIndustries(inds.length ? inds : ["Restaurant"]);
+        }
+      });
+  }, []);
 
   // Function to get today's day name
   const getTodayHours = (hours: string[]) => {
@@ -42,6 +61,7 @@ export default function BusinessLookupPage() {
     setTempFilterNoWebsite(filterNoWebsite);
     setTempInitialRadius(initialRadius);
     setTempMaxRadius(maxRadius);
+    setTempKeywords(keywords);
     setShowFilter(true);
   }
 
@@ -50,6 +70,7 @@ export default function BusinessLookupPage() {
     setFilterNoWebsite(tempFilterNoWebsite);
     setInitialRadius(tempInitialRadius);
     setMaxRadius(tempMaxRadius);
+    setKeywords(tempKeywords);
     setShowFilter(false);
   }
 
@@ -67,6 +88,7 @@ export default function BusinessLookupPage() {
         no_website: filterNoWebsite ? "true" : "false",
         initial_radius: initialRadius.toString(),
         max_radius: maxRadius.toString(),
+        keywords: keywords,
       });
       const res = await fetch(`http://localhost:8001/api/businesses/search?${params.toString()}`);
       if (!res.ok) throw new Error(await res.text());
@@ -79,10 +101,20 @@ export default function BusinessLookupPage() {
   }
 
   async function handleAddToDashboard(idx) {
-    const result = results[idx];
+    setPendingAddIdx(idx);
+    setIndustryInput("");
+    setIndustryDropdown("");
+    setShowIndustryModal(true);
+  }
+
+  async function confirmAddToDashboard() {
+    if (pendingAddIdx === null) return;
+    const result = results[pendingAddIdx];
     if (!result) return;
     setError("");
     setLoading(true);
+    setShowIndustryModal(false);
+    const industry = industryInput.trim() || industryDropdown || "Restaurant";
     try {
       const res = await fetch("http://localhost:8001/api/businesses", {
         method: "POST",
@@ -93,15 +125,17 @@ export default function BusinessLookupPage() {
           address: result.address || "",
           status: "tocall",
           comments: "",
-          hours: result.hours || ""
+          hours: result.hours || "",
+          industry,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
-      setAddedIdx(idx);
+      setAddedIdx(pendingAddIdx);
     } catch (err) {
       setError("Failed to add business to dashboard");
     }
     setLoading(false);
+    setPendingAddIdx(null);
   }
 
   async function handleAddAll() {
@@ -167,6 +201,17 @@ export default function BusinessLookupPage() {
             <h3 className="text-xl font-bold mb-4">Filter Results</h3>
             <form onSubmit={e => { e.preventDefault(); handleApplyFilter(); }} className="flex flex-col gap-4">
               <label className="flex flex-col gap-1">
+                <span className="font-semibold">Search Keywords</span>
+                <input
+                  type="text"
+                  value={tempKeywords}
+                  onChange={e => setTempKeywords(e.target.value)}
+                  className="border rounded px-3 py-2"
+                  placeholder="Enter keywords separated by commas (e.g. restaurant, cafe, bar)"
+                />
+                <span className="text-sm text-gray-500">These keywords will be prepended to your search query</span>
+              </label>
+              <label className="flex flex-col gap-1">
                 <span className="font-semibold">Number of Results</span>
                 <input
                   type="number"
@@ -213,6 +258,30 @@ export default function BusinessLookupPage() {
                 Apply
               </button>
             </form>
+          </div>
+        </div>
+      )}
+      {showIndustryModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md relative">
+            <button onClick={() => setShowIndustryModal(false)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
+            <h3 className="text-xl font-bold mb-4">Select Industry</h3>
+            <div className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1">
+                <span className="font-semibold">Choose an existing industry</span>
+                <select value={industryDropdown} onChange={e => setIndustryDropdown(e.target.value)} className="border rounded px-3 py-2">
+                  <option value="">-- Select Industry --</option>
+                  {allIndustries.map(ind => (
+                    <option key={ind} value={ind}>{ind}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-semibold">Or enter a new industry</span>
+                <input type="text" value={industryInput} onChange={e => setIndustryInput(e.target.value)} className="border rounded px-3 py-2" placeholder="e.g. Bakery, Cafe, etc." />
+              </label>
+              <button onClick={confirmAddToDashboard} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-lg shadow transition-all duration-200">Add to Dashboard</button>
+            </div>
           </div>
         </div>
       )}

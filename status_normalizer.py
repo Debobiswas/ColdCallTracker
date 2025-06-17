@@ -2,7 +2,7 @@ import pandas as pd
 import os
 
 # Define the valid statuses (must match the ones in api.py)
-VALID_STATUSES = ['tocall', 'called', 'callback', 'dont_call', 'client']
+VALID_STATUSES = ['tocall', 'called', 'callback', 'dont_call', 'client', 'lead']
 
 def normalize_status(status):
     """Normalize a status value to one of the valid statuses."""

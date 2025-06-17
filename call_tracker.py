@@ -40,6 +40,11 @@ valid_commands = [
     "dont call",
     "callback",
     "list callback",
+    "today callbacks",
+    "overdue callbacks",
+    "high priority",
+    "medium priority", 
+    "low priority",
     "tocall",
     "list tocall",
     "help",
@@ -122,13 +127,21 @@ def load_data(file_path=EXCEL_FILE):
     """Load data from Excel file, create if doesn't exist."""
     if not os.path.exists(file_path):
         create_empty_excel()
-    return pd.read_excel(file_path)
+    df = pd.read_excel(file_path)
+    # Ensure all new tracking columns exist
+    df = ensure_date_columns(df)
+    return df
 
 def save_to_excel(df, file_path=EXCEL_FILE):
     """
     Save DataFrame to Excel with verification.
     Ensures file is properly closed after saving.
     """
+    # Ensure all rows have Industry set to 'Restaurant' if missing or blank
+    if 'Industry' not in df.columns:
+        df['Industry'] = 'Restaurant'
+    else:
+        df['Industry'] = df['Industry'].fillna('Restaurant').replace('', 'Restaurant')
     try:
         print(f"Saving to Excel: {file_path}")
         df.to_excel(file_path, index=False)
@@ -326,9 +339,9 @@ def mark_dont_call(df, place_name):
 
 
 
-def mark_callback(df, place_name):
+def mark_callback(df, place_name, callback_date='', callback_time='', reason='', priority='Medium'):
     """
-    Mark the place's status as 'Call Back'.
+    Mark the place's status as 'Call Back' with enhanced tracking.
     """
     place_mask = df['Name'].str.lower().str.strip() == place_name.lower().strip()
     
@@ -336,35 +349,178 @@ def mark_callback(df, place_name):
         print(f"❌ No matching place found for '{place_name}'.")
         return df
 
-    df.loc[place_mask, 'Status'] = "Call Back"
-    print(f"📞 Updated: {place_name} is now marked as 'Call Back'.")
+    # Ensure new columns exist
+    df = ensure_date_columns(df)
+    
+    # Update basic status
+    df.loc[place_mask, 'Status'] = "callback"
+    
+    # Set callback due date/time if provided, otherwise default to tomorrow
+    if not callback_date:
+        from datetime import datetime, timedelta
+        tomorrow = datetime.now() + timedelta(days=1)
+        callback_date = tomorrow.strftime('%Y-%m-%d')
+        callback_time = '10:00'  # Default time
+    
+    df.loc[place_mask, 'CallbackDueDate'] = callback_date
+    df.loc[place_mask, 'CallbackDueTime'] = callback_time
+    df.loc[place_mask, 'CallbackReason'] = reason or 'Follow-up required'
+    df.loc[place_mask, 'CallbackPriority'] = priority
+    
+    # Increment callback count
+    current_count = df.loc[place_mask, 'CallbackCount'].iloc[0] if not df.loc[place_mask, 'CallbackCount'].empty else 0
+    df.loc[place_mask, 'CallbackCount'] = int(current_count) + 1
+    
+    # Update last callback date
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    df.loc[place_mask, 'LastCallbackDate'] = today_str
+    
+    print(f"📞 Updated: {place_name} is now marked as 'callback' - Due: {callback_date} at {callback_time}")
     return df
 
 
 
 def list_callback(df):
-    """List all places marked as 'Call Back'."""
-    status_mask = df['Status'].str.lower().str.strip() == "call back"
+    """List all places marked as 'callback' with enhanced information."""
+    df = ensure_date_columns(df)
+    status_mask = df['Status'].str.lower().str.strip() == "callback"
     filtered = df[status_mask]
 
     if filtered.empty:
-        print("✅ No places marked as 'Call Back'.")
+        print("✅ No places marked as 'callback'.")
     else:
-        print("\n📞 **Call Back List:**")
+        print("\n📞 **Enhanced Callback List:**")
         table_data = []
         for _, row in filtered.iterrows():
             name = row['Name'] if pd.notna(row['Name']) and row['Name'] else "No name available."
             phone_number = row['Number'] if row['Number'].strip() else "No phone number available."
-            address = row['Address'] if row['Address'].strip() else "No address available."
-            comments = row['Comments'] if row['Comments'].strip() else "No comments."
+            due_date = row.get('CallbackDueDate', '') or 'Not set'
+            due_time = row.get('CallbackDueTime', '') or 'Not set'
+            priority = row.get('CallbackPriority', 'Medium')
+            reason = row.get('CallbackReason', '') or 'No reason'
+            count = row.get('CallbackCount', 0)
 
-            table_data.append([name, phone_number, address, comments])
+            table_data.append([name, phone_number, f"{due_date} {due_time}", priority, reason, count])
 
-        print(tabulate(table_data, headers=["Restaurant Name", "Phone Number", "Address", "Comments"], tablefmt="grid"))
-
-
+        print(tabulate(table_data, headers=["Name", "Phone", "Due Date/Time", "Priority", "Reason", "Attempts"], tablefmt="grid"))
 
 
+def list_callbacks_due_today(df):
+    """List callbacks that are due today."""
+    from datetime import datetime
+    df = ensure_date_columns(df)
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    status_mask = df['Status'].str.lower().str.strip() == "callback"
+    due_today_mask = df['CallbackDueDate'] == today
+    filtered = df[status_mask & due_today_mask]
+    
+    if filtered.empty:
+        print("✅ No callbacks due today.")
+    else:
+        print(f"\n🔥 **Callbacks Due Today ({today}):**")
+        table_data = []
+        for _, row in filtered.iterrows():
+            name = row['Name']
+            phone = row['Number'] or 'No phone'
+            time = row.get('CallbackDueTime', 'No time set')
+            priority = row.get('CallbackPriority', 'Medium')
+            reason = row.get('CallbackReason', 'No reason')
+            
+            table_data.append([name, phone, time, priority, reason])
+        
+        # Sort by priority (High, Medium, Low) and then by time
+        priority_order = {'High': 1, 'Medium': 2, 'Low': 3}
+        table_data.sort(key=lambda x: (priority_order.get(x[3], 2), x[2]))
+        
+        print(tabulate(table_data, headers=["Name", "Phone", "Time", "Priority", "Reason"], tablefmt="grid"))
+
+
+def list_overdue_callbacks(df):
+    """List callbacks that are overdue."""
+    from datetime import datetime
+    df = ensure_date_columns(df)
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    status_mask = df['Status'].str.lower().str.strip() == "callback"
+    overdue_mask = (df['CallbackDueDate'] != '') & (df['CallbackDueDate'] < today)
+    filtered = df[status_mask & overdue_mask]
+    
+    if filtered.empty:
+        print("✅ No overdue callbacks.")
+    else:
+        print(f"\n🚨 **OVERDUE Callbacks:**")
+        table_data = []
+        for _, row in filtered.iterrows():
+            name = row['Name']
+            phone = row['Number'] or 'No phone'
+            due_date = row.get('CallbackDueDate', 'No date')
+            priority = row.get('CallbackPriority', 'Medium')
+            reason = row.get('CallbackReason', 'No reason')
+            attempts = row.get('CallbackCount', 0)
+            
+            # Calculate days overdue
+            if due_date != 'No date':
+                due = datetime.strptime(due_date, '%Y-%m-%d')
+                days_overdue = (datetime.now() - due).days
+            else:
+                days_overdue = 0
+            
+            table_data.append([name, phone, due_date, f"{days_overdue} days", priority, reason, attempts])
+        
+        # Sort by days overdue (most overdue first)
+        table_data.sort(key=lambda x: int(x[3].split()[0]), reverse=True)
+        
+        print(tabulate(table_data, headers=["Name", "Phone", "Due Date", "Overdue", "Priority", "Reason", "Attempts"], tablefmt="grid"))
+
+
+def update_lead_info(df, place_name, interest_level='', best_time='', decision_maker='', next_action='', lead_score=None):
+    """Update detailed lead information for better tracking."""
+    place_mask = df['Name'].str.lower().str.strip() == place_name.lower().strip()
+    
+    if not place_mask.any():
+        print(f"❌ No matching place found for '{place_name}'.")
+        return df
+    
+    df = ensure_date_columns(df)
+    
+    if interest_level:
+        df.loc[place_mask, 'InterestLevel'] = interest_level
+    if best_time:
+        df.loc[place_mask, 'BestTimeToCall'] = best_time
+    if decision_maker:
+        df.loc[place_mask, 'DecisionMaker'] = decision_maker
+    if next_action:
+        df.loc[place_mask, 'NextAction'] = next_action
+    if lead_score is not None:
+        df.loc[place_mask, 'LeadScore'] = max(1, min(10, int(lead_score)))  # Ensure 1-10 range
+    
+    print(f"✅ Updated lead information for {place_name}")
+    return df
+
+
+def get_priority_callbacks(df, priority='High'):
+    """Get callbacks by priority level."""
+    df = ensure_date_columns(df)
+    status_mask = df['Status'].str.lower().str.strip() == "callback"
+    priority_mask = df['CallbackPriority'].str.lower() == priority.lower()
+    filtered = df[status_mask & priority_mask]
+    
+    if filtered.empty:
+        print(f"✅ No {priority.lower()} priority callbacks.")
+    else:
+        print(f"\n⭐ **{priority.upper()} Priority Callbacks:**")
+        table_data = []
+        for _, row in filtered.iterrows():
+            name = row['Name']
+            phone = row['Number'] or 'No phone'
+            due_date = row.get('CallbackDueDate', 'Not set')
+            due_time = row.get('CallbackDueTime', 'Not set')
+            reason = row.get('CallbackReason', 'No reason')
+            
+            table_data.append([name, phone, f"{due_date} {due_time}", reason])
+        
+        print(tabulate(table_data, headers=["Name", "Phone", "Due Date/Time", "Reason"], tablefmt="grid"))
 
 
 def help():
@@ -393,9 +549,14 @@ def help():
     print("   - `List Dont Call` → Show all businesses that have been marked as 'Don't Call'.")
     print("--------------------------------------------------")
     print("✅ **Managing Callbacks:**")
-    print("   - `Callback BusinessName` → Mark a business as 'Call Back'.")
+    print("   - `Callback BusinessName` → Mark a business as 'callback' (defaults to tomorrow at 10:00).")
     print("   - Example: `Callback Apple Store`")
-    print("   - `List Callback` → Show all businesses marked as 'Call Back'.")
+    print("   - `List Callback` → Show all businesses marked as 'callback' with enhanced details.")
+    print("   - `Today Callbacks` → Show callbacks due today, sorted by priority.")
+    print("   - `Overdue Callbacks` → Show overdue callbacks with days overdue.")
+    print("   - `High Priority` → Show high priority callbacks only.")
+    print("   - `Medium Priority` → Show medium priority callbacks only.")
+    print("   - `Low Priority` → Show low priority callbacks only.")
     print("--------------------------------------------------")
     print("✅ **Adding & Resetting Comments:**")
     print("   - `Comment BusinessName - Your Comment` → Add a note to a business.")
@@ -667,6 +828,21 @@ def main():
         elif user_input == "list callback":
             list_callback(df)
 
+        elif user_input == "today callbacks":
+            list_callbacks_due_today(df)
+
+        elif user_input == "overdue callbacks":
+            list_overdue_callbacks(df)
+
+        elif user_input == "high priority":
+            get_priority_callbacks(df, "High")
+
+        elif user_input == "medium priority":
+            get_priority_callbacks(df, "Medium")
+
+        elif user_input == "low priority":
+            get_priority_callbacks(df, "Low")
+
         elif user_input and user_input.startswith("tocall "):
             place_name = user_input[len("tocall "):].strip()
             df = mark_tocall(df, place_name)
@@ -683,24 +859,51 @@ def api_direct_save(df, file_path=EXCEL_FILE):
     Save DataFrame to Excel directly without any comment processing.
     This is used by the API to ensure comments are not appended with timestamps.
     """
-    print(f"API DIRECT SAVE to {file_path} - NO COMMENT PROCESSING")
-    try:
-        # Make a clean copy to avoid side effects
-        save_df = df.copy()
-        # Direct save with no processing
-        save_df.to_excel(file_path, index=False)
-        print(f"API direct save completed successfully to {file_path}")
-        return True
-    except Exception as e:
-        print(f"ERROR in api_direct_save: {str(e)}")
-        return False
+    # Ensure all rows have Industry set to 'Restaurant' if missing or blank
+    if 'Industry' not in df.columns:
+        df['Industry'] = 'Restaurant'
+    else:
+        df['Industry'] = df['Industry'].fillna('Restaurant').replace('', 'Restaurant')
+    save_to_excel(df, file_path)
 
 def ensure_date_columns(df):
+    """Ensure all tracking columns exist with default values."""
     if 'LastCalledDate' not in df.columns:
         df['LastCalledDate'] = ''
     if 'LastCallbackDate' not in df.columns:
         df['LastCallbackDate'] = ''
+    
+    # New enhanced callback tracking columns
+    if 'CallbackDueDate' not in df.columns:
+        df['CallbackDueDate'] = ''
+    if 'CallbackDueTime' not in df.columns:
+        df['CallbackDueTime'] = ''
+    if 'CallbackReason' not in df.columns:
+        df['CallbackReason'] = ''
+    if 'CallbackPriority' not in df.columns:
+        df['CallbackPriority'] = 'Medium'  # High, Medium, Low
+    if 'CallbackCount' not in df.columns:
+        df['CallbackCount'] = 0
+    if 'LeadScore' not in df.columns:
+        df['LeadScore'] = 5  # 1-10 scale, 5 is neutral
+    if 'InterestLevel' not in df.columns:
+        df['InterestLevel'] = 'Unknown'  # High, Medium, Low, Unknown
+    if 'BestTimeToCall' not in df.columns:
+        df['BestTimeToCall'] = ''
+    if 'DecisionMaker' not in df.columns:
+        df['DecisionMaker'] = ''
+    if 'NextAction' not in df.columns:
+        df['NextAction'] = ''
+    
     return df
 
+def set_all_industries_to_restaurant():
+    df = load_data()
+    df['Industry'] = 'Restaurant'
+    save_to_excel(df)
+    print('All current listings set to Industry = Restaurant.')
+
 if __name__ == "__main__":
+    # One-time update: set all current industries to Restaurant
+    set_all_industries_to_restaurant()  # <-- Remove or comment out after running once
     main()

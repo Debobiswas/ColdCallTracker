@@ -8,6 +8,7 @@ import os
 import traceback
 from datetime import datetime
 from itertools import islice
+from urllib.parse import unquote
 
 app = FastAPI()
 
@@ -21,7 +22,7 @@ app.add_middleware(
 )
 
 # Valid status values
-VALID_STATUSES = ['tocall', 'called', 'callback', 'dont_call', 'client']
+VALID_STATUSES = ['tocall', 'called', 'callback', 'dont_call', 'client', 'lead']
 
 class Business(BaseModel):
     name: str
@@ -33,6 +34,18 @@ class Business(BaseModel):
     google_maps_url: str = ""
     region: str = ""
     hours: str = ""
+    industry: str = "Restaurant"
+    # Enhanced callback tracking fields
+    callback_due_date: str = ""
+    callback_due_time: str = ""
+    callback_reason: str = ""
+    callback_priority: str = "Medium"
+    callback_count: int = 0
+    lead_score: int = 5
+    interest_level: str = "Unknown"
+    best_time_to_call: str = ""
+    decision_maker: str = ""
+    next_action: str = ""
 
 class BusinessUpdate(BaseModel):
     name: Optional[str] = None
@@ -43,6 +56,18 @@ class BusinessUpdate(BaseModel):
     comments: Optional[str] = None
     region: Optional[str] = None
     hours: Optional[str] = None
+    industry: Optional[str] = None
+    # Enhanced callback tracking fields
+    callback_due_date: Optional[str] = None
+    callback_due_time: Optional[str] = None
+    callback_reason: Optional[str] = None
+    callback_priority: Optional[str] = None
+    callback_count: Optional[int] = None
+    lead_score: Optional[int] = None
+    interest_level: Optional[str] = None
+    best_time_to_call: Optional[str] = None
+    decision_maker: Optional[str] = None
+    next_action: Optional[str] = None
 
 class NewBusiness(BaseModel):
     name: str
@@ -54,6 +79,7 @@ class NewBusiness(BaseModel):
     google_maps_url: str = ""
     region: str = ""
     hours: str = ""
+    industry: str = "Restaurant"
 
 class BulkBusinessRequest(BaseModel):
     businesses: List[NewBusiness]
@@ -147,11 +173,11 @@ def set_env_api_key(data: dict):
 async def get_all_businesses():
     try:
         df = ct.load_data(ct.EXCEL_FILE)
-        
-        # Add Hours column if it doesn't exist
+        # Add missing columns if they don't exist
         if 'Hours' not in df.columns:
             df['Hours'] = ''
-            
+        if 'Industry' not in df.columns:
+            df['Industry'] = 'Restaurant'
         businesses = []
         for _, row in df.iterrows():
             businesses.append(Business(
@@ -160,7 +186,19 @@ async def get_all_businesses():
                 address=str(row['Address']) if not pd.isna(row['Address']) else "",
                 status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
                 comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
-                hours=str(row['Hours']) if not pd.isna(row['Hours']) else ""
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
+                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
+                # Enhanced callback tracking fields
+                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
+                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
+                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
+                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
+                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
+                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
+                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
+                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
+                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
+                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
             ))
         return businesses
     except Exception as e:
@@ -171,14 +209,12 @@ async def get_all_businesses():
 async def get_businesses_by_status(status: str):
     if status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}")
-    
     try:
         df = ct.load_data(ct.EXCEL_FILE)
-        
-        # Add Hours column if it doesn't exist
         if 'Hours' not in df.columns:
             df['Hours'] = ''
-            
+        if 'Industry' not in df.columns:
+            df['Industry'] = 'Restaurant'
         filtered_df = df[df['Status'].str.lower() == status.lower()]
         businesses = []
         for _, row in filtered_df.iterrows():
@@ -188,7 +224,8 @@ async def get_businesses_by_status(status: str):
                 address=str(row['Address']) if not pd.isna(row['Address']) else "",
                 status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
                 comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
-                hours=str(row['Hours']) if not pd.isna(row['Hours']) else ""
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
+                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant"
             ))
         return businesses
     except Exception as e:
@@ -198,30 +235,44 @@ async def get_businesses_by_status(status: str):
 @app.get("/api/businesses/filter", response_model=List[Business])
 async def filter_businesses(
     status: Optional[str] = Query(None),
-    region: Optional[str] = Query(None)
+    region: Optional[str] = Query(None),
+    industry: Optional[str] = Query(None)
 ):
     try:
         print("\n\n===== FILTER ENDPOINT HIT =====")
-        print(f"Query parameters - status: {status}, region: {region}")
-
+        print(f"Query parameters - status: {status}, region: {region}, industry: {industry}")
         df = ct.load_data(ct.EXCEL_FILE)
-        # Add Hours column if it doesn't exist
         if 'Hours' not in df.columns:
             df['Hours'] = ''
-        # Add Region column if it doesn't exist
-        if 'Region' not in df.columns:
-            df['Region'] = ''
+        if 'Industry' not in df.columns:
+            df['Industry'] = 'Restaurant'
         print(f"Loaded {len(df)} businesses from Excel")
-        # Apply filters
+        
         if status and status.strip():
             status_lower = status.strip().lower()
             df['status_lower'] = df['Status'].astype(str).str.lower().str.strip()
             df = df[df['status_lower'] == status_lower]
+            print(f"After status filter: {len(df)} businesses")
+            
         if region and region.strip():
+            def extract_city(address):
+                if pd.isna(address):
+                    return ''
+                parts = str(address).split(',')
+                if len(parts) >= 2:
+                    return parts[1].strip()
+                return ''
+            df['city'] = df['Address'].apply(extract_city)
             region_lower = region.strip().lower()
-            df['region_lower'] = df['Region'].astype(str).str.lower().str.strip()
-            df = df[df['region_lower'] == region_lower]
-        # Prepare the response
+            df = df[df['city'].str.lower() == region_lower]
+            print(f"After region filter: {len(df)} businesses")
+            
+        if industry and industry.strip():
+            industry_lower = industry.strip().lower()
+            df['industry_lower'] = df['Industry'].astype(str).str.lower().str.strip()
+            df = df[df['industry_lower'] == industry_lower]
+            print(f"After industry filter: {len(df)} businesses")
+        
         businesses = []
         for _, row in df.iterrows():
             businesses.append(Business(
@@ -231,7 +282,7 @@ async def filter_businesses(
                 status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
                 comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
                 hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
-                region=str(row['Region']) if not pd.isna(row['Region']) else ""
+                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant"
             ))
         print(f"Returning {len(businesses)} businesses")
         print("===== END FILTER ENDPOINT =====\n\n")
@@ -244,12 +295,20 @@ async def filter_businesses(
 @app.put("/api/businesses/{name}")
 async def update_business(name: str, update: BusinessUpdate):
     try:
+        # Properly decode URL-encoded business name
+        decoded_name = unquote(name)
+        print(f"PUT request for business: '{name}' -> decoded: '{decoded_name}'")
+        
         df = ct.load_data(ct.EXCEL_FILE)
         # Robust name matching: ignore case and whitespace
-        name_clean = name.strip().lower()
+        name_clean = decoded_name.strip().lower()
         df['Name_clean'] = df['Name'].astype(str).str.strip().str.lower()
+        
+        print(f"Looking for name_clean: '{name_clean}'")
+        print(f"Available names: {df['Name_clean'].tolist()[:10]}...")  # Show first 10 for debugging
+        
         if name_clean not in df['Name_clean'].values:
-            raise HTTPException(status_code=404, detail="Business not found")
+            raise HTTPException(status_code=404, detail=f"Business not found: '{decoded_name}'")
         row_mask = df['Name_clean'] == name_clean
 
         # Ensure date columns exist
@@ -272,6 +331,8 @@ async def update_business(name: str, update: BusinessUpdate):
                 df.loc[row_mask, 'Status'] = 'tocall'
             elif update.status == "client":
                 df.loc[row_mask, 'Status'] = 'client'
+            elif update.status == "lead":
+                df.loc[row_mask, 'Status'] = 'lead'
 
         if update.comments is not None:
             df.loc[row_mask, 'Comments'] = update.comments
@@ -280,13 +341,56 @@ async def update_business(name: str, update: BusinessUpdate):
             df.loc[row_mask, 'Name'] = update.name
 
         if update.phone is not None:
-            df.loc[row_mask, 'Phone'] = update.phone
+            df.loc[row_mask, 'Number'] = update.phone
 
         if update.address is not None:
             df.loc[row_mask, 'Address'] = update.address
 
         if update.hours is not None:
             df.loc[row_mask, 'Hours'] = update.hours
+
+        if update.industry is not None:
+            # Ensure Industry column exists
+            if 'Industry' not in df.columns:
+                df['Industry'] = 'Restaurant'
+            df.loc[row_mask, 'Industry'] = update.industry
+
+        # Handle enhanced callback tracking fields
+        if update.callback_due_date is not None:
+            df.loc[row_mask, 'CallbackDueDate'] = update.callback_due_date
+        
+        if update.callback_due_time is not None:
+            df.loc[row_mask, 'CallbackDueTime'] = update.callback_due_time
+        
+        if update.callback_reason is not None:
+            df.loc[row_mask, 'CallbackReason'] = update.callback_reason
+        
+        if update.callback_priority is not None:
+            if update.callback_priority not in ['High', 'Medium', 'Low']:
+                raise HTTPException(status_code=400, detail="Priority must be High, Medium, or Low")
+            df.loc[row_mask, 'CallbackPriority'] = update.callback_priority
+        
+        if update.callback_count is not None:
+            df.loc[row_mask, 'CallbackCount'] = update.callback_count
+        
+        if update.lead_score is not None:
+            if not (1 <= update.lead_score <= 10):
+                raise HTTPException(status_code=400, detail="Lead score must be between 1 and 10")
+            df.loc[row_mask, 'LeadScore'] = update.lead_score
+        
+        if update.interest_level is not None:
+            if update.interest_level not in ['High', 'Medium', 'Low', 'Unknown']:
+                raise HTTPException(status_code=400, detail="Interest level must be High, Medium, Low, or Unknown")
+            df.loc[row_mask, 'InterestLevel'] = update.interest_level
+        
+        if update.best_time_to_call is not None:
+            df.loc[row_mask, 'BestTimeToCall'] = update.best_time_to_call
+        
+        if update.decision_maker is not None:
+            df.loc[row_mask, 'DecisionMaker'] = update.decision_maker
+        
+        if update.next_action is not None:
+            df.loc[row_mask, 'NextAction'] = update.next_action
 
         df = df.drop(columns=['Name_clean'])
         ct.api_direct_save(df)
@@ -303,13 +407,9 @@ async def add_business(business: NewBusiness):
     try:
         if business.status not in VALID_STATUSES:
             raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}")
-        
         df = ct.load_data(ct.EXCEL_FILE)
-        
-        # Check if business already exists
         if business.name in df['Name'].values:
             raise HTTPException(status_code=400, detail="Business already exists")
-        
         # Add new business
         new_row = pd.DataFrame({
             'Name': [business.name],
@@ -317,12 +417,11 @@ async def add_business(business: NewBusiness):
             'Address': [business.address],
             'Status': [business.status],
             'Comments': [business.comments],
-            'Hours': [business.hours]
+            'Hours': [business.hours],
+            'Industry': [business.industry if business.industry else 'Restaurant']
         })
-        
         df = pd.concat([df, new_row], ignore_index=True)
         ct.api_direct_save(df)
-        
         return {"message": "Business added successfully"}
     except HTTPException:
         raise
@@ -336,42 +435,46 @@ async def add_businesses_bulk(request: BulkBusinessRequest):
         df = ct.load_data(ct.EXCEL_FILE)
         added_count = 0
         errors = []
-
         for business in request.businesses:
             try:
                 if business.status not in VALID_STATUSES:
                     errors.append(f"Invalid status for {business.name}. Must be one of: {', '.join(VALID_STATUSES)}")
                     continue
-
-                # Check if business already exists
                 if business.name in df['Name'].values:
                     errors.append(f"Business {business.name} already exists")
                     continue
-
-                # Add new business
                 new_row = pd.DataFrame({
                     'Name': [business.name],
                     'Number': [business.phone],
                     'Address': [business.address],
                     'Status': [business.status],
                     'Comments': [business.comments],
-                    'Hours': [business.hours]
+                    'Hours': [business.hours],
+                    'Industry': [business.industry if business.industry else 'Restaurant']
                 })
-
                 df = pd.concat([df, new_row], ignore_index=True)
                 added_count += 1
-
             except Exception as e:
                 errors.append(f"Error adding {business.name}: {str(e)}")
-
         if added_count > 0:
             ct.api_direct_save(df)
-
         return {
             "message": f"Added {added_count} businesses successfully",
             "added_count": added_count,
             "errors": errors
         }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/businesses/clean")
+async def clean_businesses():
+    try:
+        df = ct.load_data(ct.EXCEL_FILE)
+        # Remove businesses with no phone number
+        df = df[df['Number'].notna() & (df['Number'].str.strip() != '')]
+        ct.api_direct_save(df)
+        return {"message": "Successfully cleaned businesses without phone numbers"}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -592,10 +695,131 @@ async def lookup_business(name: str = Query(..., description="Business name to l
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/callbacks/due-today", response_model=List[Business])
+async def get_callbacks_due_today():
+    """Get all callbacks that are due today."""
+    try:
+        df = ct.load_data(ct.EXCEL_FILE)
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        status_mask = df['Status'].str.lower().str.strip() == "callback"
+        due_today_mask = df['CallbackDueDate'] == today
+        filtered_df = df[status_mask & due_today_mask]
+        
+        businesses = []
+        for _, row in filtered_df.iterrows():
+            businesses.append(Business(
+                name=str(row['Name']),
+                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
+                address=str(row['Address']) if not pd.isna(row['Address']) else "",
+                status=str(row['Status']) if not pd.isna(row['Status']) else "callback",
+                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
+                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
+                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
+                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
+                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
+                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
+                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
+                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
+                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
+                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
+                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
+                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
+            ))
+        
+        # Sort by priority and time
+        priority_order = {'High': 1, 'Medium': 2, 'Low': 3}
+        businesses.sort(key=lambda x: (priority_order.get(x.callback_priority, 2), x.callback_due_time))
+        
+        return businesses
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/callbacks/overdue", response_model=List[Business])
+async def get_overdue_callbacks():
+    """Get all callbacks that are overdue."""
+    try:
+        df = ct.load_data(ct.EXCEL_FILE)
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        status_mask = df['Status'].str.lower().str.strip() == "callback"
+        overdue_mask = (df['CallbackDueDate'] != '') & (df['CallbackDueDate'] < today)
+        filtered_df = df[status_mask & overdue_mask]
+        
+        businesses = []
+        for _, row in filtered_df.iterrows():
+            businesses.append(Business(
+                name=str(row['Name']),
+                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
+                address=str(row['Address']) if not pd.isna(row['Address']) else "",
+                status=str(row['Status']) if not pd.isna(row['Status']) else "callback",
+                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
+                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
+                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
+                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
+                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
+                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
+                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
+                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
+                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
+                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
+                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
+                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
+            ))
+        
+        return businesses
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/callbacks/priority/{priority}", response_model=List[Business])
+async def get_callbacks_by_priority(priority: str):
+    """Get callbacks by priority level (High, Medium, Low)."""
+    if priority not in ['High', 'Medium', 'Low']:
+        raise HTTPException(status_code=400, detail="Priority must be High, Medium, or Low")
+    
+    try:
+        df = ct.load_data(ct.EXCEL_FILE)
+        status_mask = df['Status'].str.lower().str.strip() == "callback"
+        priority_mask = df['CallbackPriority'].str.lower() == priority.lower()
+        filtered_df = df[status_mask & priority_mask]
+        
+        businesses = []
+        for _, row in filtered_df.iterrows():
+            businesses.append(Business(
+                name=str(row['Name']),
+                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
+                address=str(row['Address']) if not pd.isna(row['Address']) else "",
+                status=str(row['Status']) if not pd.isna(row['Status']) else "callback",
+                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
+                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
+                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
+                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
+                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
+                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
+                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
+                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
+                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
+                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
+                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
+                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
+            ))
+        
+        return businesses
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/businesses/search")
 async def search_businesses(
     query: str = Query(..., description="Search query for businesses"),
-    limit: int = Query(15, gt=0, description="Number of results to return"),
+    limit: int = Query(60, gt=0, description="Number of results to return"),
     no_website: bool = Query(False, description="Only include results without a website"),
     initial_radius: int = Query(1000, description="Initial search radius in meters"),
     max_radius: int = Query(50000, description="Maximum search radius in meters"),
@@ -606,7 +830,7 @@ async def search_businesses(
         if keywords:
             keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
         else:
-            keyword_list = ['restaurant', 'cafe', 'bar', 'bistro', 'diner']
+            keyword_list = ['restaurant', 'cafe', 'Tavern', 'coffee', 'bistro', 'diner']
 
         all_results = []
         seen = set()
@@ -672,6 +896,134 @@ async def search_businesses(
     except Exception as e:
         print(f"Search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/vapi/send-listings")
+async def send_listings_to_vapi(data: dict):
+    """Send selected business listings to VAPI agent for calling"""
+    try:
+        # Get the configuration
+        vapi_token = data.get("vapi_token")
+        vapi_agent_id = data.get("vapi_agent_id") 
+        vapi_phone_number_id = data.get("vapi_phone_number_id")
+        business_names = data.get("business_names", [])
+        
+        if not vapi_token or not vapi_agent_id or not vapi_phone_number_id:
+            raise HTTPException(status_code=400, detail="VAPI token, agent ID, and phone number ID are required")
+        
+        if not business_names:
+            raise HTTPException(status_code=400, detail="No businesses selected")
+        
+        # Load current businesses
+        df = ct.load_data(ct.EXCEL_FILE)
+        
+        # Function to format phone number for VAPI (+1 country code)
+        def format_phone_for_vapi(phone_str):
+            if not phone_str:
+                return ""
+            
+            # Remove all non-digit characters
+            digits_only = ''.join(filter(str.isdigit, str(phone_str)))
+            
+            # If it's already 11 digits starting with 1, format as +1XXXXXXXXXX
+            if len(digits_only) == 11 and digits_only.startswith('1'):
+                return f"+{digits_only}"
+            
+            # If it's 10 digits, add +1 prefix
+            elif len(digits_only) == 10:
+                return f"+1{digits_only}"
+            
+            # If it's other format, try to extract 10 digits and add +1
+            elif len(digits_only) >= 10:
+                # Take the last 10 digits
+                return f"+1{digits_only[-10:]}"
+            
+            # If less than 10 digits, return as is (might be invalid)
+            else:
+                return f"+1{digits_only}" if digits_only else ""
+
+        # Filter businesses that are selected and have phone numbers
+        selected_businesses = []
+        for _, row in df.iterrows():
+            business_name = str(row['Name'])
+            if business_name in business_names and not pd.isna(row['Number']):
+                formatted_phone = format_phone_for_vapi(row['Number'])
+                selected_businesses.append({
+                    "name": business_name,
+                    "phone": formatted_phone,
+                    "address": str(row['Address']) if not pd.isna(row['Address']) else "",
+                    "status": str(row['Status']) if not pd.isna(row['Status']) else "tocall",
+                    "comments": str(row['Comments']) if not pd.isna(row['Comments']) else "",
+                    "industry": str(row.get('Industry', 'Restaurant')) if not pd.isna(row.get('Industry', 'Restaurant')) else "Restaurant"
+                })
+        
+        if not selected_businesses:
+            raise HTTPException(status_code=400, detail="No businesses found with phone numbers")
+        
+        # Send to VAPI
+        import requests
+        
+        vapi_url = "https://api.vapi.ai/call"
+        headers = {
+            "Authorization": f"Bearer {vapi_token}",
+            "Content-Type": "application/json"
+        }
+        
+        calls_initiated = []
+        failed_calls = []
+        
+        for business in selected_businesses:
+            payload = {
+                "assistantId": vapi_agent_id,
+                "phoneNumberId": vapi_phone_number_id,
+                "customer": {
+                    "number": business["phone"],
+                    "name": business["name"]
+                },
+                "assistantOverrides": {
+                    "variableValues": {
+                        "businessName": business["name"],
+                        "businessAddress": business["address"],
+                        "businessIndustry": business["industry"],
+                        "businessComments": business["comments"],
+                        "businessStatus": business["status"]
+                    }
+                }
+            }
+            
+            try:
+                response = requests.post(vapi_url, headers=headers, json=payload, timeout=30)
+                if response.status_code == 201:
+                    call_data = response.json()
+                    calls_initiated.append({
+                        "business": business["name"],
+                        "phone": business["phone"],
+                        "call_id": call_data.get("id"),
+                        "status": "initiated"
+                    })
+                else:
+                    failed_calls.append({
+                        "business": business["name"],
+                        "phone": business["phone"],
+                        "error": f"HTTP {response.status_code}: {response.text}"
+                    })
+            except requests.RequestException as e:
+                failed_calls.append({
+                    "business": business["name"],
+                    "phone": business["phone"],
+                    "error": str(e)
+                })
+        
+        return {
+            "message": f"VAPI integration completed",
+            "calls_initiated": len(calls_initiated),
+            "calls_failed": len(failed_calls),
+            "successful_calls": calls_initiated,
+            "failed_calls": failed_calls,
+            "total_businesses": len(selected_businesses)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send to VAPI: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

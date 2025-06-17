@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
-import { FaHome, FaUserFriends, FaPhone, FaCalendarAlt, FaChartBar, FaCog, FaDollarSign, FaSearch, FaMapMarkerAlt } from "react-icons/fa";
+import { FaHome, FaUserFriends, FaPhone, FaCalendarAlt, FaChartBar, FaCog, FaDollarSign, FaSearch, FaPhoneAlt } from "react-icons/fa";
 import GoogleApiKeyManager from "./GoogleApiKeyManager";
+import JsonUploader from "./components/JsonUploader";
 
 export default function Sidebar() {
   return (
@@ -14,9 +15,6 @@ export default function Sidebar() {
         <Link href="/business-lookup" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
           <FaSearch className="text-lg" /> Business Lookup
         </Link>
-        <Link href="/map" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
-          <FaMapMarkerAlt className="text-lg" /> Map
-        </Link>
         <Link href="/clients" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
           <FaUserFriends className="text-lg" /> Clients
         </Link>
@@ -26,6 +24,9 @@ export default function Sidebar() {
         <Link href="/calls" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
           <FaPhone className="text-lg" /> Calls
         </Link>
+        <Link href="/callbacks" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
+          <FaPhoneAlt className="text-lg" /> Callbacks
+        </Link>
         <Link href="/reports" className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-[#1b3358] transition font-medium">
           <FaChartBar className="text-lg" /> Reports
         </Link>
@@ -33,6 +34,7 @@ export default function Sidebar() {
           <FaDollarSign className="text-lg" /> Financials
         </Link>
       </nav>
+      <JsonUploader />
       <GoogleApiKeyManager />
     </aside>
   );
