@@ -82,7 +82,7 @@ The API provides endpoints for:
 
 ## License
 
-[Your License Here]
+[MIT]
 
 Cold Call Tracker is a tool designed to efficiently manage and track cold calls. It uses the Google Places API to fetch missing phone numbers and addresses, allowing users to categorize contacts under To Call, Called, Call Back, and Don't Call statuses. The tool also enables users to add comments, reset notes, and generate organized reports.
 
