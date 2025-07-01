@@ -143,7 +143,7 @@ This will:
 ### **2. Start the Backend**
 ```bash
 cd ColdCallTracker
-python -m uvicorn api:app --reload --port 8001
+python -m uvicorn api:app --reload --port 3002
 ```
 
 ### **3. Start the Frontend**
@@ -153,9 +153,9 @@ npm run dev
 ```
 
 ### **4. Access the Interface**
-- **Main Dashboard**: http://localhost:3000
-- **Callbacks Page**: http://localhost:3000/callbacks
-- **API Documentation**: http://localhost:8001/docs
+- **Main Dashboard**: http://localhost:3004
+- **Callbacks Page**: http://localhost:3004/callbacks
+- **API Documentation**: http://localhost:3002/docs
 
 ## 📊 Usage Examples
 

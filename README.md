@@ -21,9 +21,9 @@ This application handles sensitive business data and API keys. Please follow the
    VAPI_TOKEN=your_vapi_token_here
    VAPI_AGENT_ID=your_vapi_agent_id_here
    VAPI_PHONE_NUMBER_ID=your_vapi_phone_number_id_here
-   PORT=8000
+   PORT=3002
    HOST=127.0.0.1
-   ALLOWED_ORIGINS=http://localhost:3000
+   ALLOWED_ORIGINS=http://localhost:3004
    ```
 
 3. Install Python dependencies:
