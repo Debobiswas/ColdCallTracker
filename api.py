@@ -9,6 +9,23 @@ import traceback
 from datetime import datetime
 from itertools import islice
 from urllib.parse import unquote
+from backend.database import (
+    get_all_businesses,
+    get_businesses_by_status,
+    update_business,
+    create_business,
+    delete_business,
+    get_all_meetings,
+    create_meeting,
+    update_meeting,
+    delete_meeting,
+    get_all_clients,
+    create_client,
+    update_client,
+    delete_client,
+    get_callbacks_due_today,
+    get_overdue_callbacks
+)
 
 app = FastAPI()
 
@@ -172,35 +189,7 @@ def set_env_api_key(data: dict):
 @app.get("/api/businesses", response_model=List[Business])
 async def get_all_businesses():
     try:
-        df = ct.load_data(ct.EXCEL_FILE)
-        # Add missing columns if they don't exist
-        if 'Hours' not in df.columns:
-            df['Hours'] = ''
-        if 'Industry' not in df.columns:
-            df['Industry'] = 'Restaurant'
-        businesses = []
-        for _, row in df.iterrows():
-            businesses.append(Business(
-                name=str(row['Name']),
-                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
-                address=str(row['Address']) if not pd.isna(row['Address']) else "",
-                status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
-                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
-                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
-                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
-                # Enhanced callback tracking fields
-                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
-                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
-                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
-                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
-                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
-                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
-                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
-                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
-                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
-                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
-            ))
-        return businesses
+        return await get_all_businesses()
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -210,24 +199,7 @@ async def get_businesses_by_status(status: str):
     if status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}")
     try:
-        df = ct.load_data(ct.EXCEL_FILE)
-        if 'Hours' not in df.columns:
-            df['Hours'] = ''
-        if 'Industry' not in df.columns:
-            df['Industry'] = 'Restaurant'
-        filtered_df = df[df['Status'].str.lower() == status.lower()]
-        businesses = []
-        for _, row in filtered_df.iterrows():
-            businesses.append(Business(
-                name=str(row['Name']),
-                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
-                address=str(row['Address']) if not pd.isna(row['Address']) else "",
-                status=str(row['Status']) if not pd.isna(row['Status']) else "tocall",
-                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
-                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
-                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant"
-            ))
-        return businesses
+        return await get_businesses_by_status(status)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -482,17 +454,7 @@ async def clean_businesses():
 @app.delete("/api/businesses/{name}")
 async def delete_business(name: str):
     try:
-        df = ct.load_data(ct.EXCEL_FILE)
-        if name not in df['Name'].values:
-            raise HTTPException(status_code=404, detail="Business not found")
-        
-        # Remove the business
-        df = df[df['Name'] != name]
-        ct.api_direct_save(df)
-        
-        return {"message": "Business deleted successfully"}
-    except HTTPException:
-        raise
+        return await delete_business(name)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -501,18 +463,7 @@ async def delete_business(name: str):
 @app.get("/api/meetings", response_model=List[Meeting])
 async def get_all_meetings():
     try:
-        df = pd.read_excel("meetings.xlsx") if os.path.exists("meetings.xlsx") else pd.DataFrame(columns=['id', 'business_name', 'date', 'time', 'notes', 'status'])
-        meetings = []
-        for _, row in df.iterrows():
-            meetings.append(Meeting(
-                id=str(row['id']),
-                business_name=str(row['business_name']),
-                date=str(row['date']),
-                time=str(row['time']),
-                notes=None if pd.isna(row['notes']) else str(row['notes']),
-                status=str(row['status'])
-            ))
-        return meetings
+        return await get_all_meetings()
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -520,32 +471,7 @@ async def get_all_meetings():
 @app.post("/api/meetings", response_model=Meeting)
 async def create_meeting(meeting: MeetingCreate):
     try:
-        df = pd.read_excel("meetings.xlsx") if os.path.exists("meetings.xlsx") else pd.DataFrame(columns=['id', 'business_name', 'date', 'time', 'notes', 'status'])
-        
-        # Generate a unique ID
-        new_id = str(len(df) + 1)
-        
-        # Add new meeting
-        new_row = pd.DataFrame({
-            'id': [new_id],
-            'business_name': [meeting.business_name],
-            'date': [meeting.date],
-            'time': [meeting.time],
-            'notes': [meeting.notes],
-            'status': ['scheduled']
-        })
-        
-        df = pd.concat([df, new_row], ignore_index=True)
-        df.to_excel("meetings.xlsx", index=False)
-        
-        return Meeting(
-            id=new_id,
-            business_name=meeting.business_name,
-            date=meeting.date,
-            time=meeting.time,
-            notes=meeting.notes,
-            status='scheduled'
-        )
+        return await create_meeting(meeting)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -553,27 +479,7 @@ async def create_meeting(meeting: MeetingCreate):
 @app.put("/api/meetings/{meeting_id}")
 async def update_meeting(meeting_id: str, update: MeetingUpdate):
     try:
-        if not os.path.exists("meetings.xlsx"):
-            raise HTTPException(status_code=404, detail="No meetings found")
-        
-        df = pd.read_excel("meetings.xlsx")
-        if meeting_id not in df['id'].astype(str).values:
-            raise HTTPException(status_code=404, detail="Meeting not found")
-        
-        # Update meeting details
-        if update.date:
-            df.loc[df['id'].astype(str) == meeting_id, 'date'] = update.date
-        if update.time:
-            df.loc[df['id'].astype(str) == meeting_id, 'time'] = update.time
-        if update.notes:
-            df.loc[df['id'].astype(str) == meeting_id, 'notes'] = update.notes
-        if update.status:
-            df.loc[df['id'].astype(str) == meeting_id, 'status'] = update.status
-        
-        df.to_excel("meetings.xlsx", index=False)
-        return {"message": "Meeting updated successfully"}
-    except HTTPException:
-        raise
+        return await update_meeting(meeting_id, update)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -581,77 +487,42 @@ async def update_meeting(meeting_id: str, update: MeetingUpdate):
 @app.delete("/api/meetings/{meeting_id}")
 async def delete_meeting(meeting_id: str):
     try:
-        if not os.path.exists("meetings.xlsx"):
-            raise HTTPException(status_code=404, detail="No meetings found")
-        
-        df = pd.read_excel("meetings.xlsx")
-        if meeting_id not in df['id'].astype(str).values:
-            raise HTTPException(status_code=404, detail="Meeting not found")
-        
-        # Remove the meeting
-        df = df[df['id'].astype(str) != meeting_id]
-        df.to_excel("meetings.xlsx", index=False)
-        
-        return {"message": "Meeting deleted successfully"}
-    except HTTPException:
-        raise
+        return await delete_meeting(meeting_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/clients", response_model=List[Client])
 async def get_clients():
-    df = load_clients()
-    return [
-        Client(
-            name=row["Name"] if not pd.isna(row["Name"]) else "",
-            address=row["Address"] if not pd.isna(row["Address"]) else "",
-            phone=row["Phone"] if not pd.isna(row["Phone"]) else "",
-            website=row["Website"] if not pd.isna(row["Website"]) else "",
-            price=str(row["Price"]) if not pd.isna(row["Price"]) else "0",
-            subscription=str(row["Subscription"]) if not pd.isna(row["Subscription"]) else "0",
-            date=str(row["Date"]) if not pd.isna(row["Date"]) else "",
-        )
-        for _, row in df.iterrows()
-    ]
+    try:
+        return await get_all_clients()
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/clients")
 async def add_client(client: Client):
-    df = load_clients()
-    if client.name in df["Name"].values:
-        raise HTTPException(status_code=400, detail="Client already exists")
-    new_row = pd.DataFrame({
-        "Name": [client.name],
-        "Address": [client.address],
-        "Phone": [client.phone],
-        "Website": [client.website],
-        "Price": [client.price],
-        "Subscription": [client.subscription],
-        "Date": [client.date],
-    })
-    df = pd.concat([df, new_row], ignore_index=True)
-    save_clients(df)
-    return {"message": "Client added successfully"}
+    try:
+        return await create_client(client)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/clients/{name}")
 async def update_client(name: str, client: Client):
-    df = load_clients()
-    if name not in df["Name"].values:
-        raise HTTPException(status_code=404, detail="Client not found")
-    df.loc[df["Name"] == name, ["Name", "Address", "Phone", "Website", "Price", "Subscription", "Date"]] = [
-        client.name, client.address, client.phone, client.website, client.price, client.subscription, client.date
-    ]
-    save_clients(df)
-    return {"message": "Client updated successfully"}
+    try:
+        return await update_client(name, client)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/clients/{name}")
 async def delete_client(name: str):
-    df = load_clients()
-    if name not in df["Name"].values:
-        raise HTTPException(status_code=404, detail="Client not found")
-    df = df[df["Name"] != name]
-    save_clients(df)
-    return {"message": "Client deleted successfully"}
+    try:
+        return await delete_client(name)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/businesses/lookup")
 async def lookup_business(name: str = Query(..., description="Business name to look up")):
@@ -699,41 +570,7 @@ async def lookup_business(name: str = Query(..., description="Business name to l
 async def get_callbacks_due_today():
     """Get all callbacks that are due today."""
     try:
-        df = ct.load_data(ct.EXCEL_FILE)
-        from datetime import datetime
-        today = datetime.now().strftime('%Y-%m-%d')
-        
-        status_mask = df['Status'].str.lower().str.strip() == "callback"
-        due_today_mask = df['CallbackDueDate'] == today
-        filtered_df = df[status_mask & due_today_mask]
-        
-        businesses = []
-        for _, row in filtered_df.iterrows():
-            businesses.append(Business(
-                name=str(row['Name']),
-                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
-                address=str(row['Address']) if not pd.isna(row['Address']) else "",
-                status=str(row['Status']) if not pd.isna(row['Status']) else "callback",
-                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
-                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
-                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
-                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
-                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
-                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
-                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
-                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
-                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
-                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
-                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
-                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
-                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
-            ))
-        
-        # Sort by priority and time
-        priority_order = {'High': 1, 'Medium': 2, 'Low': 3}
-        businesses.sort(key=lambda x: (priority_order.get(x.callback_priority, 2), x.callback_due_time))
-        
-        return businesses
+        return await get_callbacks_due_today()
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -742,37 +579,7 @@ async def get_callbacks_due_today():
 async def get_overdue_callbacks():
     """Get all callbacks that are overdue."""
     try:
-        df = ct.load_data(ct.EXCEL_FILE)
-        from datetime import datetime
-        today = datetime.now().strftime('%Y-%m-%d')
-        
-        status_mask = df['Status'].str.lower().str.strip() == "callback"
-        overdue_mask = (df['CallbackDueDate'] != '') & (df['CallbackDueDate'] < today)
-        filtered_df = df[status_mask & overdue_mask]
-        
-        businesses = []
-        for _, row in filtered_df.iterrows():
-            businesses.append(Business(
-                name=str(row['Name']),
-                phone=str(row['Number']) if not pd.isna(row['Number']) else "",
-                address=str(row['Address']) if not pd.isna(row['Address']) else "",
-                status=str(row['Status']) if not pd.isna(row['Status']) else "callback",
-                comments=str(row['Comments']) if not pd.isna(row['Comments']) else "",
-                hours=str(row['Hours']) if not pd.isna(row['Hours']) else "",
-                industry=str(row['Industry']) if not pd.isna(row['Industry']) else "Restaurant",
-                callback_due_date=str(row.get('CallbackDueDate', '')) if not pd.isna(row.get('CallbackDueDate', '')) else "",
-                callback_due_time=str(row.get('CallbackDueTime', '')) if not pd.isna(row.get('CallbackDueTime', '')) else "",
-                callback_reason=str(row.get('CallbackReason', '')) if not pd.isna(row.get('CallbackReason', '')) else "",
-                callback_priority=str(row.get('CallbackPriority', 'Medium')) if not pd.isna(row.get('CallbackPriority', 'Medium')) else "Medium",
-                callback_count=int(row.get('CallbackCount', 0)) if not pd.isna(row.get('CallbackCount', 0)) else 0,
-                lead_score=int(row.get('LeadScore', 5)) if not pd.isna(row.get('LeadScore', 5)) else 5,
-                interest_level=str(row.get('InterestLevel', 'Unknown')) if not pd.isna(row.get('InterestLevel', 'Unknown')) else "Unknown",
-                best_time_to_call=str(row.get('BestTimeToCall', '')) if not pd.isna(row.get('BestTimeToCall', '')) else "",
-                decision_maker=str(row.get('DecisionMaker', '')) if not pd.isna(row.get('DecisionMaker', '')) else "",
-                next_action=str(row.get('NextAction', '')) if not pd.isna(row.get('NextAction', '')) else ""
-            ))
-        
-        return businesses
+        return await get_overdue_callbacks()
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
