@@ -3,7 +3,18 @@ import React, { useEffect, useState, useRef } from "react";
 import Papa from 'papaparse';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
 
-const API_URL = "http://localhost:8001/api/businesses";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api/businesses";
+
+// Sample data for when API is not available
+const SAMPLE_DATA: Business[] = [
+  {
+    name: "Sample Business",
+    phone: "123-456-7890",
+    address: "123 Main St, Sample City",
+    status: "tocall",
+    industry: "Restaurant"
+  }
+];
 
 type Business = {
   name: string;
@@ -170,22 +181,25 @@ export default function Dashboard() {
         console.log('✅ Received data from API');
         setBusinesses(Array.isArray(data) ? data : []);
       } catch (apiError) {
-        console.log('⚠️ API not available, using local storage or empty state');
-        // Try to get data from localStorage
+        console.log('⚠️ API not available, using local storage or sample data');
+        // Try to get data from localStorage first
         const savedData = localStorage.getItem('businesses');
         if (savedData) {
           const parsedData = JSON.parse(savedData);
           setBusinesses(parsedData);
         } else {
-          // If no saved data, set empty array
-          setBusinesses([]);
+          // If no saved data, use sample data
+          console.log('Using sample data');
+          setBusinesses(SAMPLE_DATA);
+          // Save sample data to localStorage
+          localStorage.setItem('businesses', JSON.stringify(SAMPLE_DATA));
         }
       }
     } catch (e) {
       console.error('❌ Error:', e);
       setError("Failed to load businesses");
-      // Ensure we have at least an empty array
-      setBusinesses([]);
+      // Use sample data as fallback
+      setBusinesses(SAMPLE_DATA);
     }
     setLoading(false);
   }
