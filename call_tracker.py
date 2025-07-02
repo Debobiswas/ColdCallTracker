@@ -102,17 +102,18 @@ def speak(text):
 #---------------------------------Functions---------------------------------#
 
 # Initialize Google Maps API client
-gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
-
 gmaps = None
 
 def initialize_gmaps():
+    """Initialize Google Maps client if API key is available"""
     global gmaps
     key = os.getenv('GOOGLE_API_KEY')
     if key:
-        gmaps = googlemaps.Client(key=key)
-    else:
-        gmaps = None
+        try:
+            gmaps = googlemaps.Client(key=key)
+        except Exception as e:
+            print(f"Warning: Could not initialize Google Maps client: {e}")
+            gmaps = None
 
 # Initialize on startup
 initialize_gmaps()
@@ -161,8 +162,12 @@ def save_to_excel(df, file_path=EXCEL_FILE):
 def get_business_details_online(place_name):
     """
     Searches for the business phone number and address using Google Places API.
-    Returns (phone_number, address) if found, else (None, None).
+    Returns (None, None) if API is not configured.
     """
+    if not gmaps:
+        print("Google Maps API not configured - skipping online lookup")
+        return None, None
+        
     try:
         # Search for the place (1st API call)
         result = gmaps.places(query=place_name)

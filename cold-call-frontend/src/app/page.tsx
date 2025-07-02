@@ -159,58 +159,97 @@ export default function Dashboard() {
         ? `${API_URL}/filter?${params.toString()}`
         : API_URL;
       
-      console.log('🌐 Fetching from URL:', url); // Debug log
+      console.log('🌐 Attempting to fetch from URL:', url);
       
-      const res = await fetch(url);
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('❌ API Error:', errorText);
-        throw new Error(`API Error: ${errorText}`);
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`API Error: ${await res.text()}`);
+        }
+        const data = await res.json();
+        console.log('✅ Received data from API');
+        setBusinesses(Array.isArray(data) ? data : []);
+      } catch (apiError) {
+        console.log('⚠️ API not available, using local storage or empty state');
+        // Try to get data from localStorage
+        const savedData = localStorage.getItem('businesses');
+        if (savedData) {
+          const parsedData = JSON.parse(savedData);
+          setBusinesses(parsedData);
+        } else {
+          // If no saved data, set empty array
+          setBusinesses([]);
+        }
       }
-      const data = await res.json();
-      console.log('✅ Received data count:', data.length); // Debug log
-      console.log('📋 Sample businesses:', data.slice(0, 3).map((b: any) => ({
-        name: b.name,
-        phone: b.phone,
-        status: b.status
-      })));
-      
-      // Check for tocall businesses
-      const tocallBusinesses = data.filter((b: any) => b.status?.toLowerCase() === 'tocall' && b.phone);
-      console.log(`🎯 Found ${tocallBusinesses.length} businesses ready for autodialer`);
-      
-      setBusinesses(Array.isArray(data) ? data : []);
     } catch (e) {
-      console.error('❌ Fetch error:', e);
-      setError("Failed to fetch businesses");
+      console.error('❌ Error:', e);
+      setError("Failed to load businesses");
+      // Ensure we have at least an empty array
       setBusinesses([]);
     }
     setLoading(false);
   }
 
+  // Add function to save businesses to localStorage whenever they change
+  useEffect(() => {
+    if (businesses.length > 0) {
+      localStorage.setItem('businesses', JSON.stringify(businesses));
+    }
+  }, [businesses]);
+
   async function fetchCallbackSummary() {
     try {
-      const [todayRes, overdueRes, highPriorityRes] = await Promise.all([
-        fetch("http://localhost:8001/api/callbacks/due-today"),
-        fetch("http://localhost:8001/api/callbacks/overdue"),
-        fetch("http://localhost:8001/api/callbacks/priority/High")
-      ]);
-
-      if (todayRes.ok && overdueRes.ok && highPriorityRes.ok) {
-        const [todayData, overdueData, highPriorityData] = await Promise.all([
-          todayRes.json(),
-          overdueRes.json(),
-          highPriorityRes.json()
+      // Try to fetch from API first
+      try {
+        const [todayRes, overdueRes, highPriorityRes] = await Promise.all([
+          fetch("http://localhost:8001/api/callbacks/due-today"),
+          fetch("http://localhost:8001/api/callbacks/overdue"),
+          fetch("http://localhost:8001/api/callbacks/priority/High")
         ]);
 
-        setCallbackSummary({
-          dueToday: todayData.length,
-          overdue: overdueData.length,
-          highPriority: highPriorityData.length
-        });
+        if (todayRes.ok && overdueRes.ok && highPriorityRes.ok) {
+          const [todayData, overdueData, highPriorityData] = await Promise.all([
+            todayRes.json(),
+            overdueRes.json(),
+            highPriorityRes.json()
+          ]);
+
+          setCallbackSummary({
+            dueToday: todayData.length,
+            overdue: overdueData.length,
+            highPriority: highPriorityData.length
+          });
+          return;
+        }
+      } catch (apiError) {
+        console.log('⚠️ API not available for callback summary');
       }
+
+      // If API fails, calculate from local businesses
+      const today = new Date().toISOString().split('T')[0];
+      
+      const dueToday = businesses.filter(b => 
+        b.callback_due_date === today
+      ).length;
+
+      const overdue = businesses.filter(b => {
+        if (!b.callback_due_date) return false;
+        return new Date(b.callback_due_date) < new Date(today);
+      }).length;
+
+      const highPriority = businesses.filter(b =>
+        b.callback_priority === 'High'
+      ).length;
+
+      setCallbackSummary({
+        dueToday,
+        overdue,
+        highPriority
+      });
+
     } catch (e) {
-      console.error("Failed to fetch callback summary:", e);
+      console.error('Error fetching callback summary:', e);
+      setCallbackSummary({ dueToday: 0, overdue: 0, highPriority: 0 });
     }
   }
 
