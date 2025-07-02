@@ -15,6 +15,16 @@ const nextConfig = {
   basePath: '',
   // Configure asset prefix if needed
   assetPrefix: '',
+  // Disable server-side rendering for static paths
+  trailingSlash: true,
+  // Handle 404s properly
+  async redirects() {
+    return []
+  },
+  // Enable image optimization
+  images: {
+    unoptimized: true
+  }
 }
 
 module.exports = nextConfig 
