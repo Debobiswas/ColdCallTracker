@@ -44,20 +44,10 @@ export default function FinancialsPage() {
   ];
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10">
-      <h2 className="text-3xl font-bold mb-8">Financials</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-        {cards.map((card, idx) => (
-          <div
-            key={idx}
-            className="bg-white rounded-2xl shadow-2xl p-12 min-h-[260px] flex flex-col items-center justify-center border border-gray-100 hover:shadow-3xl transition-all duration-150"
-          >
-            <div className="text-gray-400 text-sm uppercase tracking-wider mb-2 font-semibold">
-              {card.title}
-            </div>
-            <div className="text-4xl font-bold text-blue-700 mb-1">{card.value}</div>
-          </div>
-        ))}
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Financials</h1>
+      <div className="bg-white rounded-lg shadow p-6">
+        <p>Financial information will be displayed here</p>
       </div>
     </div>
   );
