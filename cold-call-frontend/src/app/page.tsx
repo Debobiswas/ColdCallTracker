@@ -3,6 +3,9 @@ import React, { useEffect, useState, useRef } from "react";
 import Papa from 'papaparse';
 import { FaChevronDown, FaChevronUp } from 'react-icons/fa';
 
+// Force new deployment
+console.log('App version: 1.0.1');
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api/businesses";
 
 // Sample data for when API is not available
