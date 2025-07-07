@@ -165,29 +165,61 @@ async def upload_businesses_route(businesses: list, request: Request):
             return {"error": "Required modules not available"}
         user_id = await get_current_user(request)
         print(f"Received request to upload {len(businesses)} businesses for user {user_id}.")
+        
+        # Get existing businesses to check for duplicates
+        existing_businesses = await get_all_businesses(user_id)
+        existing_phones = {b.get('phone', '').strip() for b in existing_businesses if b.get('phone')}
+        existing_names = {b.get('name', '').strip().lower() for b in existing_businesses if b.get('name')}
+        
         created_businesses = []
         failed_businesses = []
+        skipped_businesses = []
+        
         for i, business in enumerate(businesses):
             try:
-                business_name = business.get('name', f'Business #{i+1}')
+                business_name = business.get('name', f'Business #{i+1}').strip()
+                business_phone = business.get('phone', '').strip()
+                
+                # Check for duplicates
+                if business_phone in existing_phones:
+                    skipped_businesses.append({
+                        "name": business_name, 
+                        "reason": f"Duplicate phone: {business_phone}"
+                    })
+                    continue
+                    
+                if business_name.lower() in existing_names:
+                    skipped_businesses.append({
+                        "name": business_name, 
+                        "reason": "Duplicate name"
+                    })
+                    continue
+                
                 print(f"Processing business #{i+1}: {business_name}")
                 created_business = await create_business(business, user_id)
                 created_businesses.append(created_business)
+                
+                # Add to existing sets to prevent duplicates within this batch
+                existing_phones.add(business_phone)
+                existing_names.add(business_name.lower())
+                
                 print(f"Successfully created business #{i+1}: {business_name}")
             except Exception as e:
                 # Continue processing other businesses even if one fails
                 error_message = f"Failed to create business {business_name}: {e}"
                 print(error_message)
-                # Optionally, you can collect failed businesses and report them
                 failed_businesses.append({"name": business_name, "error": str(e)})
 
-        print(f"Upload complete. Successfully created: {len(created_businesses)}, Failed: {len(failed_businesses)}")
-        if failed_businesses:
-            # You could raise an exception here or return a mixed response
-            # For now, just returning successfully created ones
-            print("Failed businesses:", failed_businesses)
-
-        return created_businesses
+        print(f"Upload complete. Created: {len(created_businesses)}, Skipped: {len(skipped_businesses)}, Failed: {len(failed_businesses)}")
+        
+        return {
+            "created": created_businesses,
+            "created_count": len(created_businesses),
+            "skipped_count": len(skipped_businesses),
+            "failed_count": len(failed_businesses),
+            "skipped_businesses": skipped_businesses[:10],  # Show first 10 skipped
+            "failed_businesses": failed_businesses[:10]      # Show first 10 failed
+        }
     except Exception as e:
         return {"error": str(e), "status": "upload businesses endpoint failed"}
 

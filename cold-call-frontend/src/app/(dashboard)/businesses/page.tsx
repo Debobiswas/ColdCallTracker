@@ -159,24 +159,44 @@ export default function BusinessesPage() {
         }
         console.log(`Found ${businessesToUpload.length} businesses in the file. Formatting for upload...`);
         
-        const formattedBusinesses = businessesToUpload.map((biz: any) => ({
-            name: biz.title || 'N/A',
-            phone: biz.phone || '',
+        // Filter and format businesses
+        const validBusinesses = businessesToUpload.filter((biz: any) => {
+          // Must have a name and phone for cold calling
+          return biz.title && biz.title.trim() && biz.phone && biz.phone.trim();
+        });
+
+        console.log(`Filtered to ${validBusinesses.length} businesses with valid name and phone (from ${businessesToUpload.length} total)`);
+
+        const formattedBusinesses = validBusinesses.map((biz: any) => ({
+            name: biz.title.trim(),
+            phone: biz.phone.trim(),
             address: biz.address || '',
             status: 'tocall',
             hours: biz.openingHours ? biz.openingHours.map((h: any) => `${h.day}: ${h.hours}`).join(', ') : '',
-            industry: biz.categoryName || '',
+            industry: biz.categoryName || 'Business',
             region: biz.neighborhood || '',
             comments: biz.description || '',
         }));
-        console.log("Businesses formatted:", formattedBusinesses.slice(0, 5)); // Log first 5 for preview
+
+        // Remove duplicates based on phone number (most reliable for businesses)
+        const uniqueBusinesses = formattedBusinesses.filter((business, index, self) => 
+          index === self.findIndex(b => b.phone === business.phone)
+        );
+
+        console.log(`Removed ${formattedBusinesses.length - uniqueBusinesses.length} duplicates. Final count: ${uniqueBusinesses.length}`);
+        console.log("Businesses formatted:", uniqueBusinesses.slice(0, 5)); // Log first 5 for preview
+
+        if (uniqueBusinesses.length === 0) {
+          setError("No valid businesses found in the file. Businesses must have a name and phone number.");
+          return;
+        }
 
         setLoading(true);
-        console.log("Sending data to /api/businesses/upload...");
+        console.log(`Sending ${uniqueBusinesses.length} unique businesses to /api/businesses/upload...`);
         const response = await fetch(`${API_URL}/upload`, {
             method: 'POST',
             headers: getHeaders(),
-            body: JSON.stringify(formattedBusinesses),
+            body: JSON.stringify(uniqueBusinesses),
         });
         console.log("Received response from API:", response.status, response.statusText);
 
@@ -186,9 +206,34 @@ export default function BusinessesPage() {
             throw new Error(errorData.detail || 'Failed to upload businesses');
         }
 
+        const result = await response.json();
+        console.log("Upload result:", result);
+
+        // Create detailed summary message
+        let message = `Upload Complete!\n\n`;
+        message += `✅ Created: ${result.created_count || 0} businesses\n`;
+        message += `⏭️ Skipped: ${result.skipped_count || 0} duplicates\n`;
+        message += `❌ Failed: ${result.failed_count || 0} errors\n`;
+        
+        if (result.skipped_count > 0) {
+          message += `\nSkipped duplicates (first 5):\n`;
+          const skipped = result.skipped_businesses || [];
+          skipped.slice(0, 5).forEach((item: any) => {
+            message += `• ${item.name} (${item.reason})\n`;
+          });
+        }
+        
+        if (result.failed_count > 0) {
+          message += `\nFailed uploads (first 5):\n`;
+          const failed = result.failed_businesses || [];
+          failed.slice(0, 5).forEach((item: any) => {
+            message += `• ${item.name} (${item.error})\n`;
+          });
+        }
+
         console.log("Upload successful, fetching updated business list.");
         await fetchBusinesses();
-        alert('Businesses uploaded successfully!');
+        alert(message);
 
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during file upload.";
