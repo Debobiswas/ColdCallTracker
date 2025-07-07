@@ -273,4 +273,61 @@ For questions or issues with the Enhanced Callback Tracking System:
 3. Examine the callback page UI for guidance
 4. Test with dummy data first
 
-**Happy Calling! 🎯** 
+**Happy Calling! 🎯**
+
+## JSON Upload and API Routing Fixes
+
+### Issues Fixed:
+
+1. **API URL Configuration**: Fixed JsonUploader to use `/api` instead of `localhost:8001`
+2. **Missing /calls endpoint**: Added `/calls` routes to handle the missing endpoint errors
+3. **Unified API approach**: Updated Dashboard to use API routes instead of direct Supabase calls
+4. **Vercel routing**: Enhanced routing configuration to handle both `/api` and `/calls` routes
+
+### Root Causes of 404 Errors:
+
+1. **JsonUploader hardcoded localhost URL**: The component was trying to connect to `localhost:8001` instead of the deployed API
+2. **Missing /calls route**: The frontend was requesting `/calls/` endpoint that didn't exist
+3. **Mixed API approaches**: Dashboard used direct Supabase calls while JsonUploader used API routes
+4. **Incorrect environment variables**: API URL was not properly configured for deployment
+
+### Changes Made:
+
+1. **Updated JsonUploader.tsx**:
+   - Changed API URL from `localhost:8001/api` to `/api`
+   - Now uses `process.env.NEXT_PUBLIC_API_URL` or `/api` as fallback
+
+2. **Enhanced api/index.py**:
+   - Added missing `/api/calls` endpoint
+   - Added `/api/calls/{status}` endpoint for status-based calls
+
+3. **Updated Dashboard.tsx**:
+   - Replaced direct Supabase calls with API routes
+   - Unified all data operations through the API
+   - Improved error handling for API calls
+
+4. **Enhanced vercel.json**:
+   - Added routing for `/calls/(.*)`
+   - Added environment variable for API URL
+   - Improved routing priority
+
+5. **Updated env.example**:
+   - Changed API URL to `/api` for deployment
+
+### Testing the Fix:
+
+1. **JSON Upload**: Should now work without 404 errors
+2. **Data Loading**: Dashboard should load data through API routes
+3. **Business Operations**: CRUD operations should work through unified API
+4. **Callbacks**: Callback summary should fetch data correctly
+
+### Environment Variables:
+```
+NEXT_PUBLIC_API_URL=/api
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+## Original Enhanced Callbacks Documentation
+
+This system provides comprehensive callback tracking and management capabilities for the Cold Call Tracker application. 

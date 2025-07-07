@@ -29,19 +29,24 @@ This application handles sensitive business data and API keys. Please follow the
      - `callbacks`: For managing callback schedules
    - Copy your project URL and API keys from the Supabase dashboard
 
-3. Create a `.env` file with the following variables:
+3. Create environment configuration:
+   ```bash
+   # Copy the example environment file
+   cp env.example .env.local
+   
+   # Edit .env.local with your actual values
+   # Never commit .env.local to version control
    ```
-   PORT=3002
-   HOST=127.0.0.1
-   SUPABASE_URL=your_supabase_project_url
-   SUPABASE_KEY=your_supabase_service_role_key
-   NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-   GOOGLE_API_KEY=your_google_api_key
-   VAPI_TOKEN=your_vapi_token
-   VAPI_AGENT_ID=your_vapi_agent_id
-   VAPI_PHONE_NUMBER_ID=your_vapi_phone_number_id
-   ```
+   
+   Required environment variables:
+   - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key
+   - `SUPABASE_URL`: Your Supabase project URL (for backend)
+   - `SUPABASE_KEY`: Your Supabase service role key (for backend)
+   
+   Optional variables:
+   - `GOOGLE_API_KEY`: For Google Places business lookup
+   - `VAPI_TOKEN`, `VAPI_AGENT_ID`, `VAPI_PHONE_NUMBER_ID`: For voice calling features
 
 4. Install backend dependencies:
    ```bash
@@ -195,3 +200,26 @@ Features:
       - Data Persistence and Export
 
 ( Stores call data in Excel (.xlsx) format for easy review and sharing.)
+
+### 3. Environment Configuration
+
+First, copy the example environment file to create your local configuration:
+
+```bash
+cp env.example .env.local
+```
+
+Next, open `.env.local` and add your credentials. This file is included in `.gitignore` and **should never be committed to version control.**
+
+#### **Required Variables**
+
+-   `NEXT_PUBLIC_SUPABASE_URL`: Your public Supabase project URL.
+-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your public Supabase anonymous key.
+-   `SUPABASE_KEY`: Your Supabase **service role key** for backend scripts.
+
+> **Note**: `SUPABASE_URL` is automatically inferred from `NEXT_PUBLIC_SUPABASE_URL` and does not need to be set separately.
+
+#### **Optional Variables**
+
+-   `GOOGLE_API_KEY`: Required for the Business Lookup feature.
+-   `VAPI_TOKEN`, `VAPI_AGENT_ID`, `VAPI_PHONE_NUMBER_ID`: Required for voice calling features.

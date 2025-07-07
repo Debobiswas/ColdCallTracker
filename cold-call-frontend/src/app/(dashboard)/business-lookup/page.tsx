@@ -29,15 +29,44 @@ export default function BusinessLookupPage() {
   const [industryDropdown, setIndustryDropdown] = useState("");
   const [pendingAddIdx, setPendingAddIdx] = useState<number | null>(null);
 
+  // Environment configuration
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const BUSINESSES_API_URL = SUPABASE_URL ? `${SUPABASE_URL}/rest/v1/businesses` : '';
+  const SEARCH_API_URL = "http://localhost:8001/api/businesses/search"; // Keep using backend for search
+
+  // Secure headers configuration
+  const getHeaders = () => {
+    if (!SUPABASE_ANON_KEY) {
+      throw new Error('Supabase configuration is missing');
+    }
+    
+    return {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    };
+  };
+
   // Fetch all businesses to get industries
   useEffect(() => {
-    fetch("http://localhost:8001/api/businesses")
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      console.warn('Supabase configuration missing, using default industries');
+      return;
+    }
+
+    fetch(BUSINESSES_API_URL, { headers: getHeaders() })
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
           const inds = Array.from(new Set(data.map((b: any) => b.industry || "Restaurant")));
           setAllIndustries(inds.length ? inds : ["Restaurant"]);
         }
+      })
+      .catch(error => {
+        console.warn('Failed to fetch industries:', error);
+        setAllIndustries(["Restaurant"]);
       });
   }, []);
 
@@ -90,7 +119,7 @@ export default function BusinessLookupPage() {
         max_radius: maxRadius.toString(),
         keywords: keywords,
       });
-      const res = await fetch(`http://localhost:8001/api/businesses/search?${params.toString()}`);
+      const res = await fetch(`${SEARCH_API_URL}?${params.toString()}`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setResults(Array.isArray(data) ? data : []);
@@ -116,9 +145,13 @@ export default function BusinessLookupPage() {
     setShowIndustryModal(false);
     const industry = industryInput.trim() || industryDropdown || "Restaurant";
     try {
-      const res = await fetch("http://localhost:8001/api/businesses", {
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        throw new Error('Supabase configuration is missing');
+      }
+
+      const res = await fetch(BUSINESSES_API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify({
           name: result.name,
           phone: result.phone || "",
@@ -129,10 +162,15 @@ export default function BusinessLookupPage() {
           industry,
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to add business: ${res.status} - ${errorText}`);
+      }
       setAddedIdx(pendingAddIdx);
     } catch (err) {
-      setError("Failed to add business to dashboard");
+      const errorMessage = err instanceof Error ? err.message : "Failed to add business to dashboard";
+      setError(errorMessage);
+      console.error('Error adding business:', err);
     }
     setLoading(false);
     setPendingAddIdx(null);
@@ -142,24 +180,35 @@ export default function BusinessLookupPage() {
     setError("");
     setLoading(true);
     try {
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        throw new Error('Supabase configuration is missing');
+      }
+
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
-        await fetch("http://localhost:8001/api/businesses", {
+        const res = await fetch(BUSINESSES_API_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getHeaders(),
           body: JSON.stringify({
             name: result.name,
             phone: result.phone || "",
             address: result.address || "",
             status: "tocall",
             comments: "",
-            hours: result.hours || ""
+            hours: result.hours || "",
+            industry: "Restaurant" // Default industry for bulk add
           }),
         });
+        
+        if (!res.ok) {
+          console.warn(`Failed to add business ${result.name}: ${res.status}`);
+        }
       }
       setAddedAll(true);
     } catch (err) {
-      setError("Failed to add all businesses to dashboard");
+      const errorMessage = err instanceof Error ? err.message : "Failed to add all businesses to dashboard";
+      setError(errorMessage);
+      console.error('Error adding all businesses:', err);
     }
     setLoading(false);
   }

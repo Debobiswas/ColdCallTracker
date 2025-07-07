@@ -1,11 +1,13 @@
-import Link from "next/link";
-import { FaHome, FaUserFriends, FaPhone, FaCalendarAlt, FaChartBar, FaCog, FaDollarSign, FaSearch, FaMapMarkerAlt } from "react-icons/fa";
-import "./globals.css";
-import Sidebar from "./Sidebar";
+import './globals.css';
+
+const defaultUrl = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : 'http://localhost:3002';
 
 export const metadata = {
-  title: "ColdCall Tracker",
-  description: "Track your cold calls and follow-ups",
+  metadataBase: new URL(defaultUrl),
+  title: 'ColdCall Tracker',
+  description: 'The fastest way to track your cold calls and manage your leads.',
 };
 
 export default function RootLayout({
@@ -16,12 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-[#f6f8fb] text-gray-900 min-h-screen font-sans">
-        <div className="flex min-h-screen">
-          <aside className="w-64 bg-[#102542] text-white flex flex-col p-6 gap-8 rounded-r-3xl shadow-lg fixed top-0 left-0 h-full z-40">
-            <Sidebar />
-          </aside>
-          <main className="flex-1 p-10 ml-64">{children}</main>
-        </div>
+        {children}
       </body>
     </html>
   );

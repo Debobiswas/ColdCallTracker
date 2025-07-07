@@ -116,14 +116,21 @@ async def get_businesses(request: Request):
     except Exception as e:
         return {"error": str(e), "status": "businesses endpoint failed"}
 
-@app.get("/api/businesses/{status}", response_model=List[Business])
+@app.get("/api/businesses/{status}")
 async def get_businesses_by_status_route(status: str, request: Request):
-    user_id = await get_current_user(request)
-    return await get_businesses_by_status(status, user_id)
-
-@app.post("/api/businesses", response_model=Business)
-async def create_business_route(business: NewBusiness, request: Request):
     try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await get_businesses_by_status(status, user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "businesses status endpoint failed"}
+
+@app.post("/api/businesses")
+async def create_business_route(business: dict, request: Request):
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
         user_id = await get_current_user(request)
         return await create_business(business, user_id)
     except Exception as e:
@@ -131,96 +138,172 @@ async def create_business_route(business: NewBusiness, request: Request):
         # The frontend is already set up to handle 400 errors and continue
         raise HTTPException(status_code=400, detail=f"Failed to add business: {str(e)}")
 
-@app.put("/api/businesses/{business_id}", response_model=Business)
-async def update_business_route(business_id: int, business: BusinessUpdate, request: Request):
-    user_id = await get_current_user(request)
-    return await update_business(business_id, business, user_id)
+@app.put("/api/businesses/{business_id}")
+async def update_business_route(business_id: int, business: dict, request: Request):
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await update_business(business_id, business, user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "update business endpoint failed"}
 
 @app.delete("/api/businesses/{business_id}")
 async def delete_business_route(business_id: int, request: Request):
-    user_id = await get_current_user(request)
-    return await delete_business(business_id, user_id)
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await delete_business(business_id, user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "delete business endpoint failed"}
 
-@app.post("/api/businesses/upload", response_model=List[Business])
-async def upload_businesses_route(businesses: List[NewBusiness], request: Request):
-    user_id = await get_current_user(request)
-    print(f"Received request to upload {len(businesses)} businesses for user {user_id}.")
-    created_businesses = []
-    failed_businesses = []
-    for i, business in enumerate(businesses):
-        try:
-            print(f"Processing business #{i+1}: {business.name}")
-            created_business = await create_business(business, user_id)
-            created_businesses.append(created_business)
-            print(f"Successfully created business #{i+1}: {business.name}")
-        except Exception as e:
-            # Continue processing other businesses even if one fails
-            error_message = f"Failed to create business {business.name}: {e}"
-            print(error_message)
-            # Optionally, you can collect failed businesses and report them
-            failed_businesses.append({"name": business.name, "error": str(e)})
+@app.post("/api/businesses/upload")
+async def upload_businesses_route(businesses: list, request: Request):
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        print(f"Received request to upload {len(businesses)} businesses for user {user_id}.")
+        created_businesses = []
+        failed_businesses = []
+        for i, business in enumerate(businesses):
+            try:
+                business_name = business.get('name', f'Business #{i+1}')
+                print(f"Processing business #{i+1}: {business_name}")
+                created_business = await create_business(business, user_id)
+                created_businesses.append(created_business)
+                print(f"Successfully created business #{i+1}: {business_name}")
+            except Exception as e:
+                # Continue processing other businesses even if one fails
+                error_message = f"Failed to create business {business_name}: {e}"
+                print(error_message)
+                # Optionally, you can collect failed businesses and report them
+                failed_businesses.append({"name": business_name, "error": str(e)})
 
-    print(f"Upload complete. Successfully created: {len(created_businesses)}, Failed: {len(failed_businesses)}")
-    if failed_businesses:
-        # You could raise an exception here or return a mixed response
-        # For now, just returning successfully created ones
-        print("Failed businesses:", failed_businesses)
+        print(f"Upload complete. Successfully created: {len(created_businesses)}, Failed: {len(failed_businesses)}")
+        if failed_businesses:
+            # You could raise an exception here or return a mixed response
+            # For now, just returning successfully created ones
+            print("Failed businesses:", failed_businesses)
 
-    return created_businesses
+        return created_businesses
+    except Exception as e:
+        return {"error": str(e), "status": "upload businesses endpoint failed"}
 
-@app.get("/api/meetings", response_model=List[Meeting])
+@app.get("/api/meetings")
 async def get_meetings():
-    return await get_all_meetings()
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await get_all_meetings()
+    except Exception as e:
+        return {"error": str(e), "status": "meetings endpoint failed"}
 
-@app.post("/api/meetings", response_model=Meeting)
-async def create_meeting_route(meeting: Meeting):
-    return await create_meeting(meeting)
+@app.post("/api/meetings")
+async def create_meeting_route(meeting: dict):
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await create_meeting(meeting)
+    except Exception as e:
+        return {"error": str(e), "status": "create meeting endpoint failed"}
 
-@app.put("/api/meetings/{meeting_id}", response_model=Meeting)
-async def update_meeting_route(meeting_id: int, meeting: Meeting):
-    return await update_meeting(meeting_id, meeting)
+@app.put("/api/meetings/{meeting_id}")
+async def update_meeting_route(meeting_id: int, meeting: dict):
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await update_meeting(meeting_id, meeting)
+    except Exception as e:
+        return {"error": str(e), "status": "update meeting endpoint failed"}
 
 @app.delete("/api/meetings/{meeting_id}")
 async def delete_meeting_route(meeting_id: int):
-    return await delete_meeting(meeting_id)
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await delete_meeting(meeting_id)
+    except Exception as e:
+        return {"error": str(e), "status": "delete meeting endpoint failed"}
 
-@app.get("/api/clients", response_model=List[Client])
+@app.get("/api/clients")
 async def get_clients():
-    return await get_all_clients()
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await get_all_clients()
+    except Exception as e:
+        return {"error": str(e), "status": "clients endpoint failed"}
 
-@app.post("/api/clients", response_model=Client)
-async def create_client_route(client: Client):
-    return await create_client(client)
+@app.post("/api/clients")
+async def create_client_route(client: dict):
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await create_client(client)
+    except Exception as e:
+        return {"error": str(e), "status": "create client endpoint failed"}
 
-@app.put("/api/clients/{client_id}", response_model=Client)
-async def update_client_route(client_id: int, client: Client):
-    return await update_client(client_id, client)
+@app.put("/api/clients/{client_id}")
+async def update_client_route(client_id: int, client: dict):
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await update_client(client_id, client)
+    except Exception as e:
+        return {"error": str(e), "status": "update client endpoint failed"}
 
 @app.delete("/api/clients/{client_id}")
 async def delete_client_route(client_id: int):
-    return await delete_client(client_id)
+    try:
+        if not DATABASE_AVAILABLE:
+            return {"error": "Database module not available"}
+        return await delete_client(client_id)
+    except Exception as e:
+        return {"error": str(e), "status": "delete client endpoint failed"}
 
-@app.get("/api/callbacks/today", response_model=List[Business])
+@app.get("/api/callbacks/today")
 async def get_today_callbacks(request: Request):
-    user_id = await get_current_user(request)
-    return await get_callbacks_due_today(user_id)
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await get_callbacks_due_today(user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "callbacks today endpoint failed"}
 
-@app.get("/api/callbacks/overdue", response_model=List[Business])
+@app.get("/api/callbacks/overdue")
 async def get_overdue_callbacks_route(request: Request):
-    user_id = await get_current_user(request)
-    return await get_overdue_callbacks(user_id)
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await get_overdue_callbacks(user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "callbacks overdue endpoint failed"}
 
-@app.get("/api/calls", response_model=List[Business])
+@app.get("/api/calls")
 async def get_calls(request: Request):
     """Get all businesses for calling purposes - alias for businesses endpoint"""
-    user_id = await get_current_user(request)
-    return await get_all_businesses(user_id)
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await get_all_businesses(user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "calls endpoint failed"}
 
-@app.get("/api/calls/{status}", response_model=List[Business])
+@app.get("/api/calls/{status}")
 async def get_calls_by_status(status: str, request: Request):
     """Get businesses by status for calling purposes"""
-    user_id = await get_current_user(request)
-    return await get_businesses_by_status(status, user_id)
+    try:
+        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
+            return {"error": "Required modules not available"}
+        user_id = await get_current_user(request)
+        return await get_businesses_by_status(status, user_id)
+    except Exception as e:
+        return {"error": str(e), "status": "calls by status endpoint failed"}
 
 # Add error handling middleware
 @app.middleware("http")
