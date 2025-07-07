@@ -95,8 +95,6 @@ export default function BusinessesPage() {
   const [error, setError] = useState("");
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     fetchBusinesses();
   }, []);
@@ -128,126 +126,6 @@ export default function BusinessesPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      console.log("File upload cancelled or no file selected.");
-      return;
-    }
-    console.log("File selected:", file.name);
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        console.log("FileReader onload triggered.");
-        const text = e.target?.result;
-        if (typeof text !== 'string') {
-          setError("Failed to read file");
-          console.error("FileReader result is not a string.");
-          return;
-        }
-        console.log("File read successfully. Parsing JSON...");
-        const businessesToUpload = JSON.parse(text);
-        console.log("JSON parsed successfully.");
-
-        if (!Array.isArray(businessesToUpload)) {
-          setError("JSON file must contain an array of businesses.");
-          console.error("Parsed JSON is not an array.");
-          return;
-        }
-        console.log(`Found ${businessesToUpload.length} businesses in the file. Formatting for upload...`);
-        
-        // Filter and format businesses
-        const validBusinesses = businessesToUpload.filter((biz: any) => {
-          // Must have a name and phone for cold calling
-          return biz.title && biz.title.trim() && biz.phone && biz.phone.trim();
-        });
-
-        console.log(`Filtered to ${validBusinesses.length} businesses with valid name and phone (from ${businessesToUpload.length} total)`);
-
-        const formattedBusinesses = validBusinesses.map((biz: any) => ({
-            name: biz.title.trim(),
-            phone: biz.phone.trim(),
-            address: biz.address || '',
-            status: 'tocall',
-            hours: biz.openingHours ? biz.openingHours.map((h: any) => `${h.day}: ${h.hours}`).join(', ') : '',
-            industry: biz.categoryName || 'Business',
-            region: biz.neighborhood || '',
-            comments: biz.description || '',
-        }));
-
-        // Remove duplicates based on phone number (most reliable for businesses)
-        const uniqueBusinesses = formattedBusinesses.filter((business, index, self) => 
-          index === self.findIndex(b => b.phone === business.phone)
-        );
-
-        console.log(`Removed ${formattedBusinesses.length - uniqueBusinesses.length} duplicates. Final count: ${uniqueBusinesses.length}`);
-        console.log("Businesses formatted:", uniqueBusinesses.slice(0, 5)); // Log first 5 for preview
-
-        if (uniqueBusinesses.length === 0) {
-          setError("No valid businesses found in the file. Businesses must have a name and phone number.");
-          return;
-        }
-
-        setLoading(true);
-        console.log(`Sending ${uniqueBusinesses.length} unique businesses to /api/businesses/upload...`);
-        const response = await fetch(`${API_URL}/upload`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(uniqueBusinesses),
-        });
-        console.log("Received response from API:", response.status, response.statusText);
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("API Error Data:", errorData);
-            throw new Error(errorData.detail || 'Failed to upload businesses');
-        }
-
-        const result = await response.json();
-        console.log("Upload result:", result);
-
-        // Create detailed summary message
-        let message = `Upload Complete!\n\n`;
-        message += `✅ Created: ${result.created_count || 0} businesses\n`;
-        message += `⏭️ Skipped: ${result.skipped_count || 0} duplicates\n`;
-        message += `❌ Failed: ${result.failed_count || 0} errors\n`;
-        
-        if (result.skipped_count > 0) {
-          message += `\nSkipped duplicates (first 5):\n`;
-          const skipped = result.skipped_businesses || [];
-          skipped.slice(0, 5).forEach((item: any) => {
-            message += `• ${item.name} (${item.reason})\n`;
-          });
-        }
-        
-        if (result.failed_count > 0) {
-          message += `\nFailed uploads (first 5):\n`;
-          const failed = result.failed_businesses || [];
-          failed.slice(0, 5).forEach((item: any) => {
-            message += `• ${item.name} (${item.error})\n`;
-          });
-        }
-
-        console.log("Upload successful, fetching updated business list.");
-        await fetchBusinesses();
-        alert(message);
-
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during file upload.";
-        setError(`Error uploading file: ${errorMessage}`);
-        console.error(err);
-      } finally {
-        setLoading(false);
-        // Reset file input
-        if(fileInputRef.current) {
-            fileInputRef.current.value = "";
-        }
-      }
-    };
-    reader.readAsText(file);
   }
 
   function openModal(business: Business | null) {
@@ -340,15 +218,26 @@ export default function BusinessesPage() {
       );
       
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Delete failed: ${response.status} - ${errorText}`);
+        const errorData = await response.json();
+        throw new Error(errorData.details || errorData.error || `Delete failed: ${response.status}`);
       }
       
+      const result = await response.json();
+      console.log('Delete successful:', result.message);
+      
+      // Refresh the businesses list
       await fetchBusinesses();
+      
+      // Reset retry count on success
+      setRetryCount(0);
+      
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : "Failed to delete business";
       setError(errorMessage);
       console.error('Error in handleDelete:', e);
+      
+      // Increment retry count for user feedback
+      setRetryCount(prev => prev + 1);
     } finally {
       setLoading(false);
     }
@@ -371,19 +260,6 @@ export default function BusinessesPage() {
             onClick={() => openModal(null)}
           >
             + New Business
-          </button>
-          <input 
-            type="file" 
-            accept=".json" 
-            onChange={handleFileUpload} 
-            className="hidden" 
-            ref={fileInputRef}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors ml-4"
-          >
-            Upload JSON
           </button>
         </div>
       </div>

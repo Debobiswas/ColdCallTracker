@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import os
 import traceback
+import json
 from datetime import datetime
 from itertools import islice
 from urllib.parse import unquote
@@ -12,14 +13,19 @@ from mangum import Mangum
 from fastapi.responses import JSONResponse
 # Try-catch imports to handle missing dependencies gracefully
 try:
-    from auth import get_current_user
+    from .auth import get_current_user
     AUTH_AVAILABLE = True
 except ImportError as e:
     print(f"Auth import failed: {e}")
-    AUTH_AVAILABLE = False
+    try:
+        from auth import get_current_user
+        AUTH_AVAILABLE = True
+    except ImportError as e2:
+        print(f"Auth import failed (both attempts): {e}, {e2}")
+        AUTH_AVAILABLE = False
 
 try:
-    from backend.database import (
+    from .database import (
         get_all_businesses,
         get_businesses_by_status,
         update_business,
@@ -39,14 +45,40 @@ try:
     DATABASE_AVAILABLE = True
 except ImportError as e:
     print(f"Database import failed: {e}")
-    DATABASE_AVAILABLE = False
+    try:
+        from database import (
+            get_all_businesses,
+            get_businesses_by_status,
+            update_business,
+            create_business,
+            delete_business,
+            get_all_meetings,
+            create_meeting,
+            update_meeting,
+            delete_meeting,
+            get_all_clients,
+            create_client,
+            update_client,
+            delete_client,
+            get_callbacks_due_today,
+            get_overdue_callbacks
+        )
+        DATABASE_AVAILABLE = True
+    except ImportError as e2:
+        print(f"Database import failed (both attempts): {e}, {e2}")
+        DATABASE_AVAILABLE = False
 
 try:
-    from models import Business, BusinessUpdate, NewBusiness, Meeting, Client
+    from .models import Business, BusinessUpdate, NewBusiness, Meeting, Client
     MODELS_AVAILABLE = True
 except ImportError as e:
     print(f"Models import failed: {e}")
-    MODELS_AVAILABLE = False
+    try:
+        from models import Business, BusinessUpdate, NewBusiness, Meeting, Client
+        MODELS_AVAILABLE = True
+    except ImportError as e2:
+        print(f"Models import failed (both attempts): {e}, {e2}")
+        MODELS_AVAILABLE = False
 
 app = FastAPI()
 
@@ -159,69 +191,98 @@ async def delete_business_route(business_id: int, request: Request):
         return {"error": str(e), "status": "delete business endpoint failed"}
 
 @app.post("/api/businesses/upload")
-async def upload_businesses_route(businesses: list, request: Request):
+async def upload_businesses_json(businesses: List[dict], request: Request):
+    """
+    Upload multiple businesses from JSON data (e.g., Google Places export)
+    Expects an array of business objects with fields like title, phone, address, etc.
+    """
     try:
         if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
             return {"error": "Required modules not available"}
+        
         user_id = await get_current_user(request)
-        print(f"Received request to upload {len(businesses)} businesses for user {user_id}.")
         
-        # Get existing businesses to check for duplicates
-        existing_businesses = await get_all_businesses(user_id)
-        existing_phones = {b.get('phone', '').strip() for b in existing_businesses if b.get('phone')}
-        existing_names = {b.get('name', '').strip().lower() for b in existing_businesses if b.get('name')}
+        if not businesses or not isinstance(businesses, list):
+            raise HTTPException(status_code=400, detail="Invalid data format. Expected array of businesses.")
         
+        # Filter and format businesses from JSON data
+        valid_businesses = []
+        for biz in businesses:
+            # Must have a name and phone for cold calling
+            if not biz.get('title') or not str(biz.get('title')).strip():
+                continue
+            if not biz.get('phone') and not biz.get('phoneUnformatted'):
+                continue
+            
+            # Map Google Places JSON fields to our business model
+            formatted_business = {
+                'name': str(biz.get('title', '')).strip(),
+                'phone': str(biz.get('phoneUnformatted', '') or biz.get('phone', '')).strip(),
+                'address': str(biz.get('address', '')).strip(),
+                'city': str(biz.get('city', '')).strip(),
+                'state': str(biz.get('state', '')).strip(),
+                'zip_code': str(biz.get('postalCode', '')).strip(),
+                'industry': str(biz.get('categoryName', 'Business')).strip(),
+                'website': str(biz.get('url', '')).strip(),
+                'status': 'new',
+                'notes': f"Imported from JSON. Rating: {biz.get('totalScore', 'N/A')}" + 
+                        (f" | {biz.get('reviewsCount', 0)} reviews" if biz.get('reviewsCount') else ""),
+                'user_id': user_id
+            }
+            
+            # Add opening hours if available
+            if biz.get('openingHours'):
+                hours_list = []
+                for hour in biz.get('openingHours', []):
+                    if isinstance(hour, dict) and hour.get('day') and hour.get('hours'):
+                        hours_list.append(f"{hour['day']}: {hour['hours']}")
+                if hours_list:
+                    formatted_business['notes'] += f" | Hours: {', '.join(hours_list)}"
+            
+            valid_businesses.append(formatted_business)
+        
+        if not valid_businesses:
+            raise HTTPException(status_code=400, detail="No valid businesses found. Each business must have a name and phone number.")
+        
+        # Remove duplicates based on phone number
+        unique_businesses = []
+        seen_phones = set()
+        for business in valid_businesses:
+            phone = business['phone']
+            if phone not in seen_phones:
+                unique_businesses.append(business)
+                seen_phones.add(phone)
+        
+        # Bulk insert businesses
         created_businesses = []
         failed_businesses = []
-        skipped_businesses = []
         
-        for i, business in enumerate(businesses):
+        for business in unique_businesses:
             try:
-                business_name = business.get('name', f'Business #{i+1}').strip()
-                business_phone = business.get('phone', '').strip()
-                
-                # Check for duplicates
-                if business_phone in existing_phones:
-                    skipped_businesses.append({
-                        "name": business_name, 
-                        "reason": f"Duplicate phone: {business_phone}"
-                    })
-                    continue
-                    
-                if business_name.lower() in existing_names:
-                    skipped_businesses.append({
-                        "name": business_name, 
-                        "reason": "Duplicate name"
-                    })
-                    continue
-                
-                print(f"Processing business #{i+1}: {business_name}")
-                created_business = await create_business(business, user_id)
-                created_businesses.append(created_business)
-                
-                # Add to existing sets to prevent duplicates within this batch
-                existing_phones.add(business_phone)
-                existing_names.add(business_name.lower())
-                
-                print(f"Successfully created business #{i+1}: {business_name}")
+                result = await create_business(business, user_id)
+                created_businesses.append(result)
             except Exception as e:
-                # Continue processing other businesses even if one fails
-                error_message = f"Failed to create business {business_name}: {e}"
-                print(error_message)
-                failed_businesses.append({"name": business_name, "error": str(e)})
-
-        print(f"Upload complete. Created: {len(created_businesses)}, Skipped: {len(skipped_businesses)}, Failed: {len(failed_businesses)}")
+                failed_businesses.append({
+                    'business': business['name'],
+                    'error': str(e)
+                })
         
         return {
+            "message": f"Successfully uploaded {len(created_businesses)} businesses",
+            "total_processed": len(businesses),
+            "valid_businesses": len(valid_businesses),
+            "unique_businesses": len(unique_businesses),
+            "created_businesses": len(created_businesses),
+            "failed_businesses": len(failed_businesses),
             "created": created_businesses,
-            "created_count": len(created_businesses),
-            "skipped_count": len(skipped_businesses),
-            "failed_count": len(failed_businesses),
-            "skipped_businesses": skipped_businesses[:10],  # Show first 10 skipped
-            "failed_businesses": failed_businesses[:10]      # Show first 10 failed
+            "failed": failed_businesses
         }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": str(e), "status": "upload businesses endpoint failed"}
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to upload businesses: {str(e)}")
 
 @app.get("/api/meetings")
 async def get_meetings():
@@ -351,4 +412,4 @@ async def error_handling_middleware(request, call_next):
         )
 
 # Vercel serverless handler
-handler = Mangum(app, lifespan="off") 
+handler = Mangum(app) 

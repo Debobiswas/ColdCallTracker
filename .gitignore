@@ -94,6 +94,8 @@ test_*.js
 *_test.js
 test_*.ts
 *_test.ts
+test_json_upload.py
+test_upload.json
 fix_autodialer.py
 autodialer_comprehensive_fix.py
 clean_comments.py
