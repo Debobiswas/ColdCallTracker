@@ -29,33 +29,19 @@ export default function BusinessLookupPage() {
   const [industryDropdown, setIndustryDropdown] = useState("");
   const [pendingAddIdx, setPendingAddIdx] = useState<number | null>(null);
 
-  // Environment configuration
-  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const BUSINESSES_API_URL = SUPABASE_URL ? `${SUPABASE_URL}/rest/v1/businesses` : '';
-  const SEARCH_API_URL = "http://localhost:8001/api/businesses/search"; // Keep using backend for search
+  // API configuration
+  const BUSINESSES_API_URL = '/api/businesses';
+  const SEARCH_API_URL = '/api/businesses/search';
 
-  // Secure headers configuration
+  // Headers configuration
   const getHeaders = () => {
-    if (!SUPABASE_ANON_KEY) {
-      throw new Error('Supabase configuration is missing');
-    }
-    
     return {
-      'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
       'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
     };
   };
 
   // Fetch all businesses to get industries
   useEffect(() => {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      console.warn('Supabase configuration missing, using default industries');
-      return;
-    }
-
     fetch(BUSINESSES_API_URL, { headers: getHeaders() })
       .then(res => res.json())
       .then(data => {
@@ -145,10 +131,6 @@ export default function BusinessLookupPage() {
     setShowIndustryModal(false);
     const industry = industryInput.trim() || industryDropdown || "Restaurant";
     try {
-      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        throw new Error('Supabase configuration is missing');
-      }
-
       const res = await fetch(BUSINESSES_API_URL, {
         method: "POST",
         headers: getHeaders(),
@@ -180,10 +162,6 @@ export default function BusinessLookupPage() {
     setError("");
     setLoading(true);
     try {
-      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        throw new Error('Supabase configuration is missing');
-      }
-
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
         const res = await fetch(BUSINESSES_API_URL, {
