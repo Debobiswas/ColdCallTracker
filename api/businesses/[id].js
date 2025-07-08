@@ -141,51 +141,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      // Delete a business - only allow users to delete their own businesses
-      console.log(`Attempting to delete business ${businessId} for user ${userId}`)
-
-      // First, check if the business exists and belongs to the user
-      const { data: businessCheck, error: checkError } = await supabase
-        .from('businesses')
-        .select('id, name, user_id')
-        .eq('id', businessId)
-        .eq('user_id', userId)
-        .single()
-
-      if (checkError || !businessCheck) {
-        console.error('Business not found or unauthorized:', checkError)
-        return res.status(404).json({ error: 'Business not found or you do not have permission to delete it' })
-      }
-
-      // Check for related records that might prevent deletion
-      const { data: relatedClients, error: clientsError } = await supabase
-        .from('clients')
-        .select('id')
-        .eq('business_id', businessId)
-        .eq('user_id', userId)
-
-      const { data: relatedMeetings, error: meetingsError } = await supabase
-        .from('meetings')
-        .select('id')
-        .eq('business_id', businessId)
-        .eq('user_id', userId)
-
-      // If there are related records, inform the user
-      if (relatedClients && relatedClients.length > 0) {
-        return res.status(400).json({ 
-          error: 'Cannot delete business with associated clients',
-          details: `This business has ${relatedClients.length} associated client(s). Please remove or reassign clients before deleting.`
-        })
-      }
-
-      if (relatedMeetings && relatedMeetings.length > 0) {
-        return res.status(400).json({ 
-          error: 'Cannot delete business with scheduled meetings',
-          details: `This business has ${relatedMeetings.length} scheduled meeting(s). Please complete or cancel meetings before deleting.`
-        })
-      }
-
-      // Proceed with deletion
+      // Delete a business
       const { data, error } = await supabase
         .from('businesses')
         .delete()
@@ -202,13 +158,11 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Business not found or unauthorized' })
       }
 
-      console.log(`Successfully deleted business ${businessId} for user ${userId}`)
-      return res.status(200).json({ 
-        message: 'Business deleted successfully',
-        deletedBusiness: data[0]
-      })
+      return res.status(200).json({ message: 'Business deleted successfully', deleted: data[0] })
     }
 
+    // Update allowed methods
+    res.setHeader('Allow', ['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
     return res.status(405).json({ error: 'Method not allowed' })
 
   } catch (error) {

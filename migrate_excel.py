@@ -97,13 +97,8 @@ def migrate_excel_to_supabase():
     try:
         print("Starting migration process...")
         
-        # Delete all existing records
-        print("Deleting existing records...")
-        delete_response = requests.delete(
-            f'{SUPABASE_URL}/rest/v1/businesses',
-            headers=headers
-        )
-        print(f"Delete response status: {delete_response.status_code}")
+        # Deletion functionality removed - migration will append/update records instead
+        print("Skipping deletion of existing records (deletion functionality removed)...")
         
         # Read the Excel file
         print("\nReading Excel file...")

@@ -30,15 +30,12 @@ try:
         get_businesses_by_status,
         update_business,
         create_business,
-        delete_business,
         get_all_meetings,
         create_meeting,
         update_meeting,
-        delete_meeting,
         get_all_clients,
         create_client,
         update_client,
-        delete_client,
         get_callbacks_due_today,
         get_overdue_callbacks
     )
@@ -51,15 +48,12 @@ except ImportError as e:
             get_businesses_by_status,
             update_business,
             create_business,
-            delete_business,
             get_all_meetings,
             create_meeting,
             update_meeting,
-            delete_meeting,
             get_all_clients,
             create_client,
             update_client,
-            delete_client,
             get_callbacks_due_today,
             get_overdue_callbacks
         )
@@ -179,16 +173,6 @@ async def update_business_route(business_id: int, business: dict, request: Reque
         return await update_business(business_id, business, user_id)
     except Exception as e:
         return {"error": str(e), "status": "update business endpoint failed"}
-
-@app.delete("/api/businesses/{business_id}")
-async def delete_business_route(business_id: int, request: Request):
-    try:
-        if not AUTH_AVAILABLE or not DATABASE_AVAILABLE:
-            return {"error": "Required modules not available"}
-        user_id = await get_current_user(request)
-        return await delete_business(business_id, user_id)
-    except Exception as e:
-        return {"error": str(e), "status": "delete business endpoint failed"}
 
 @app.post("/api/businesses/upload")
 async def upload_businesses_json(businesses: List[dict], request: Request):
@@ -311,15 +295,6 @@ async def update_meeting_route(meeting_id: int, meeting: dict):
     except Exception as e:
         return {"error": str(e), "status": "update meeting endpoint failed"}
 
-@app.delete("/api/meetings/{meeting_id}")
-async def delete_meeting_route(meeting_id: int):
-    try:
-        if not DATABASE_AVAILABLE:
-            return {"error": "Database module not available"}
-        return await delete_meeting(meeting_id)
-    except Exception as e:
-        return {"error": str(e), "status": "delete meeting endpoint failed"}
-
 @app.get("/api/clients")
 async def get_clients():
     try:
@@ -346,15 +321,6 @@ async def update_client_route(client_id: int, client: dict):
         return await update_client(client_id, client)
     except Exception as e:
         return {"error": str(e), "status": "update client endpoint failed"}
-
-@app.delete("/api/clients/{client_id}")
-async def delete_client_route(client_id: int):
-    try:
-        if not DATABASE_AVAILABLE:
-            return {"error": "Database module not available"}
-        return await delete_client(client_id)
-    except Exception as e:
-        return {"error": str(e), "status": "delete client endpoint failed"}
 
 @app.get("/api/callbacks/today")
 async def get_today_callbacks(request: Request):

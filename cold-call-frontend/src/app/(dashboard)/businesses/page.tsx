@@ -95,6 +95,11 @@ export default function BusinessesPage() {
   const [error, setError] = useState("");
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [businessToDelete, setBusinessToDelete] = useState<Business | null>(null);
+  const [selectedBusinesses, setSelectedBusinesses] = useState<Set<number>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  
   useEffect(() => {
     fetchBusinesses();
   }, []);
@@ -201,43 +206,107 @@ export default function BusinessesPage() {
     }
   }
 
-  async function handleDelete(businessId: number) {
-    if (!window.confirm("Are you sure you want to delete this business? This action cannot be undone.")) {
-      return;
-    }
+  function openDeleteModal(business: Business) {
+    setBusinessToDelete(business);
+    setShowDeleteModal(true);
+  }
+
+  function closeDeleteModal() {
+    setShowDeleteModal(false);
+    setBusinessToDelete(null);
+  }
+
+  async function handleDelete() {
+    if (!businessToDelete) return;
     
     setError("");
     setLoading(true);
     
     try {
       const response = await retryRequest(() => 
-        fetch(`${API_URL}/${businessId}`, {
+        fetch(`${API_URL}/${businessToDelete.id}`, {
           method: "DELETE",
-          headers: getHeaders()
+          headers: getHeaders(),
         })
       );
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.details || errorData.error || `Delete failed: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Delete failed: ${response.status} - ${errorText}`);
       }
       
-      const result = await response.json();
-      console.log('Delete successful:', result.message);
-      
-      // Refresh the businesses list
+      closeDeleteModal();
       await fetchBusinesses();
-      
-      // Reset retry count on success
-      setRetryCount(0);
-      
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : "Failed to delete business";
       setError(errorMessage);
       console.error('Error in handleDelete:', e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggleBusinessSelection(businessId: number) {
+    const newSelected = new Set(selectedBusinesses);
+    if (newSelected.has(businessId)) {
+      newSelected.delete(businessId);
+    } else {
+      newSelected.add(businessId);
+    }
+    setSelectedBusinesses(newSelected);
+  }
+
+  function toggleSelectAll() {
+    const filtered = showOnlyWithPhone 
+      ? businesses.filter(b => b.phone && b.phone.trim() !== '')
+      : businesses;
+    
+    if (selectedBusinesses.size === filtered.length) {
+      setSelectedBusinesses(new Set());
+    } else {
+      setSelectedBusinesses(new Set(filtered.map(b => b.id)));
+    }
+  }
+
+  function openBulkDeleteModal() {
+    setShowBulkDeleteModal(true);
+  }
+
+  function closeBulkDeleteModal() {
+    setShowBulkDeleteModal(false);
+  }
+
+  async function handleBulkDelete() {
+    if (selectedBusinesses.size === 0) return;
+    
+    setError("");
+    setLoading(true);
+    
+    try {
+      const deletePromises = Array.from(selectedBusinesses).map(businessId =>
+        retryRequest(() => 
+          fetch(`${API_URL}/${businessId}`, {
+            method: "DELETE",
+            headers: getHeaders(),
+          })
+        )
+      );
       
-      // Increment retry count for user feedback
-      setRetryCount(prev => prev + 1);
+      const responses = await Promise.all(deletePromises);
+      
+      // Check if any deletions failed
+      const failedDeletions = responses.filter(response => !response.ok);
+      if (failedDeletions.length > 0) {
+        throw new Error(`Failed to delete ${failedDeletions.length} businesses`);
+      }
+      
+      setSelectedBusinesses(new Set());
+      closeBulkDeleteModal();
+      await fetchBusinesses();
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : "Failed to delete selected businesses";
+      setError(errorMessage);
+      console.error('Error in handleBulkDelete:', e);
     } finally {
       setLoading(false);
     }
@@ -254,13 +323,37 @@ export default function BusinessesPage() {
       {error && <div className="text-red-500 bg-red-100 p-4 rounded-md mb-4">Error: {error} {retryCount > 0 && `(retrying ${retryCount} times)`}</div>}
       
       <div className="flex justify-between items-center mb-6">
-        <div>
+        <div className="flex items-center gap-4">
           <button
             className="bg-blue-500 hover:bg-blue-600 text-white font-semibold px-4 lg:px-5 py-2 rounded-lg shadow transition text-sm lg:text-base"
             onClick={() => openModal(null)}
           >
             + New Business
           </button>
+          {selectedBusinesses.size > 0 && (
+            <span className="text-sm text-gray-600">
+              {selectedBusinesses.size} selected
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showOnlyWithPhone}
+              onChange={(e) => setShowOnlyWithPhone(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Show only with phone
+          </label>
+          {selectedBusinesses.size > 0 && (
+            <button
+              className="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 lg:px-5 py-2 rounded-lg shadow transition text-sm lg:text-base"
+              onClick={openBulkDeleteModal}
+            >
+              Delete Selected ({selectedBusinesses.size})
+            </button>
+          )}
         </div>
       </div>
 
@@ -278,6 +371,14 @@ export default function BusinessesPage() {
             <table className="w-full text-left">
               <thead>
                 <tr className="text-gray-500 text-sm">
+                  <th className="py-2 px-4 font-semibold w-12">
+                    <input
+                      type="checkbox"
+                      checked={selectedBusinesses.size === filteredBusinesses.length && filteredBusinesses.length > 0}
+                      onChange={toggleSelectAll}
+                      className="rounded border-gray-300"
+                    />
+                  </th>
                   <th className="py-2 px-4 font-semibold">Name</th>
                   <th className="py-2 px-4 font-semibold">Phone</th>
                   <th className="py-2 px-4 font-semibold">Address</th>
@@ -295,7 +396,15 @@ export default function BusinessesPage() {
               </thead>
               <tbody>
                 {filteredBusinesses.map((b) => (
-                  <tr key={b.id} className="border-t border-gray-200 hover:bg-gray-50">
+                  <tr key={b.id} className={`border-t border-gray-200 hover:bg-gray-50 ${selectedBusinesses.has(b.id) ? 'bg-blue-50' : ''}`}>
+                    <td className="py-2 px-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedBusinesses.has(b.id)}
+                        onChange={() => toggleBusinessSelection(b.id)}
+                        className="rounded border-gray-300"
+                      />
+                    </td>
                     <td className="py-2 px-4 font-medium">{b.name}</td>
                     <td className="py-2 px-4">{b.phone || ''}</td>
                     <td className="py-2 px-4">{b.address || ''}</td>
@@ -309,8 +418,10 @@ export default function BusinessesPage() {
                     <td className="py-2 px-4">{b.comments || ''}</td>
                     <td className="py-2 px-4">{b.next_action || ''}</td>
                     <td className="py-2 px-4">
-                      <button className="text-blue-600 hover:underline mr-2" onClick={() => openModal(b)}>Edit</button>
-                      <button className="text-red-600 hover:underline" onClick={() => handleDelete(b.id)}>Delete</button>
+                      <div className="flex gap-2">
+                        <button className="text-blue-600 hover:underline" onClick={() => openModal(b)}>Edit</button>
+                        <button className="text-red-600 hover:underline" onClick={() => openDeleteModal(b)}>Delete</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -321,11 +432,19 @@ export default function BusinessesPage() {
           {/* Mobile Card View */}
           <div className="lg:hidden space-y-4">
             {filteredBusinesses.map((b) => (
-              <div key={b.id} className="bg-white rounded-lg shadow-md p-4 border">
+              <div key={b.id} className={`bg-white rounded-lg shadow-md p-4 border ${selectedBusinesses.has(b.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''}`}>
                 <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-semibold text-lg text-gray-900">{b.name}</h3>
-                    <p className="text-sm text-gray-600">{b.industry || 'No industry specified'}</p>
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedBusinesses.has(b.id)}
+                      onChange={() => toggleBusinessSelection(b.id)}
+                      className="rounded border-gray-300 mt-1"
+                    />
+                    <div>
+                      <h3 className="font-semibold text-lg text-gray-900">{b.name}</h3>
+                      <p className="text-sm text-gray-600">{b.industry || 'No industry specified'}</p>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button 
@@ -336,7 +455,7 @@ export default function BusinessesPage() {
                     </button>
                     <button 
                       className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition text-sm"
-                      onClick={() => handleDelete(b.id)}
+                      onClick={() => openDeleteModal(b)}
                     >
                       Delete
                     </button>
@@ -563,6 +682,66 @@ export default function BusinessesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && businessToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4 text-gray-900">Confirm Delete</h3>
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to delete <strong>{businessToDelete.name}</strong>? This action cannot be undone.
+            </p>
+            <div className="flex gap-4 justify-end">
+              <button 
+                type="button" 
+                onClick={closeDeleteModal} 
+                className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-4 py-2 rounded-lg transition"
+                disabled={loading}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleDelete} 
+                className="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4 text-gray-900">Confirm Bulk Delete</h3>
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to delete <strong>{selectedBusinesses.size}</strong> selected businesses? This action cannot be undone.
+            </p>
+            <div className="flex gap-4 justify-end">
+              <button 
+                type="button" 
+                onClick={closeBulkDeleteModal} 
+                className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-4 py-2 rounded-lg transition"
+                disabled={loading}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleBulkDelete} 
+                className="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? 'Deleting...' : `Delete ${selectedBusinesses.size} Businesses`}
+              </button>
+            </div>
           </div>
         </div>
       )}

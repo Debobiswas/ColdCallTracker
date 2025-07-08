@@ -14,15 +14,12 @@ from backend.database import (
     get_businesses_by_status,
     update_business,
     create_business,
-    delete_business,
     get_all_meetings,
     create_meeting,
     update_meeting,
-    delete_meeting,
     get_all_clients,
     create_client,
     update_client,
-    delete_client,
     get_callbacks_due_today,
     get_overdue_callbacks
 )
@@ -401,6 +398,26 @@ async def add_business(business: NewBusiness):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/businesses/{name}")
+async def delete_business(name: str):
+    try:
+        df = ct.load_data(ct.EXCEL_FILE)
+        
+        # Check if business exists
+        if name not in df['Name'].values:
+            raise HTTPException(status_code=404, detail="Business not found")
+        
+        # Remove the business
+        df = df[df['Name'] != name]
+        ct.api_direct_save(df)
+        
+        return {"message": "Business deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/businesses/bulk")
 async def add_businesses_bulk(request: BulkBusinessRequest):
     try:
@@ -439,26 +456,6 @@ async def add_businesses_bulk(request: BulkBusinessRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/businesses/clean")
-async def clean_businesses():
-    try:
-        df = ct.load_data(ct.EXCEL_FILE)
-        # Remove businesses with no phone number
-        df = df[df['Number'].notna() & (df['Number'].str.strip() != '')]
-        ct.api_direct_save(df)
-        return {"message": "Successfully cleaned businesses without phone numbers"}
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/businesses/{name}")
-async def delete_business(name: str):
-    try:
-        return await delete_business(name)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
 # Meeting endpoints
 @app.get("/api/meetings", response_model=List[Meeting])
 async def get_all_meetings():
@@ -484,14 +481,6 @@ async def update_meeting(meeting_id: str, update: MeetingUpdate):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/meetings/{meeting_id}")
-async def delete_meeting(meeting_id: str):
-    try:
-        return await delete_meeting(meeting_id)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/api/clients", response_model=List[Client])
 async def get_clients():
     try:
@@ -512,14 +501,6 @@ async def add_client(client: Client):
 async def update_client(name: str, client: Client):
     try:
         return await update_client(name, client)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/clients/{name}")
-async def delete_client(name: str):
-    try:
-        return await delete_client(name)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

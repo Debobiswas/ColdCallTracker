@@ -95,7 +95,7 @@ BEGIN
         WHERE constraint_name = 'businesses_user_id_fkey'
     ) THEN
         ALTER TABLE businesses ADD CONSTRAINT businesses_user_id_fkey 
-        FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+        FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE RESTRICT;
     END IF;
     
     -- Meetings table constraints
@@ -104,7 +104,7 @@ BEGIN
         WHERE constraint_name = 'meetings_user_id_fkey'
     ) THEN
         ALTER TABLE meetings ADD CONSTRAINT meetings_user_id_fkey 
-        FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+        FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE RESTRICT;
     END IF;
     
     IF NOT EXISTS (
@@ -112,7 +112,7 @@ BEGIN
         WHERE constraint_name = 'meetings_business_id_fkey'
     ) THEN
         ALTER TABLE meetings ADD CONSTRAINT meetings_business_id_fkey 
-        FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE;
+        FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE RESTRICT;
     END IF;
     
     -- Clients table constraints
@@ -121,7 +121,7 @@ BEGIN
         WHERE constraint_name = 'clients_user_id_fkey'
     ) THEN
         ALTER TABLE clients ADD CONSTRAINT clients_user_id_fkey 
-        FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+        FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE RESTRICT;
     END IF;
     
     IF NOT EXISTS (
@@ -129,7 +129,7 @@ BEGIN
         WHERE constraint_name = 'clients_business_id_fkey'
     ) THEN
         ALTER TABLE clients ADD CONSTRAINT clients_business_id_fkey 
-        FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE;
+        FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE RESTRICT;
     END IF;
 END $$;
 
@@ -161,7 +161,7 @@ DROP POLICY IF EXISTS "Users can insert their own clients" ON clients;
 DROP POLICY IF EXISTS "Users can update their own clients" ON clients;
 DROP POLICY IF EXISTS "Users can delete their own clients" ON clients;
 
--- Create new policies
+-- Create new policies (DELETE policies removed for security)
 -- Businesses policies
 CREATE POLICY "Users can view their own businesses" ON businesses
     FOR SELECT USING (auth.uid() = user_id);
@@ -171,9 +171,6 @@ CREATE POLICY "Users can insert their own businesses" ON businesses
 
 CREATE POLICY "Users can update their own businesses" ON businesses
     FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own businesses" ON businesses
-    FOR DELETE USING (auth.uid() = user_id);
 
 -- Meetings policies
 CREATE POLICY "Users can view their own meetings" ON meetings
@@ -185,9 +182,6 @@ CREATE POLICY "Users can insert their own meetings" ON meetings
 CREATE POLICY "Users can update their own meetings" ON meetings
     FOR UPDATE USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete their own meetings" ON meetings
-    FOR DELETE USING (auth.uid() = user_id);
-
 -- Clients policies
 CREATE POLICY "Users can view their own clients" ON clients
     FOR SELECT USING (auth.uid() = user_id);
@@ -197,9 +191,6 @@ CREATE POLICY "Users can insert their own clients" ON clients
 
 CREATE POLICY "Users can update their own clients" ON clients
     FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own clients" ON clients
-    FOR DELETE USING (auth.uid() = user_id);
 
 -- ========================================
 -- 6. CREATE/REPLACE INDEXES

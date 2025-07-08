@@ -56,14 +56,6 @@ async def create_business(data: dict, user_id: str = None):
     response = supabase.table(BUSINESSES_TABLE).insert(data).execute()
     return response.data
 
-async def delete_business(business_id: str, user_id: str = None):
-    supabase = get_supabase_client()
-    query = supabase.table(BUSINESSES_TABLE).delete().eq("id", business_id)
-    if user_id:
-        query = query.eq("user_id", user_id)
-    response = query.execute()
-    return response.data
-
 async def get_all_meetings():
     supabase = get_supabase_client()
     response = supabase.table(MEETINGS_TABLE).select("*").execute()
@@ -79,11 +71,6 @@ async def update_meeting(meeting_id: str, data: dict):
     response = supabase.table(MEETINGS_TABLE).update(data).eq("id", meeting_id).execute()
     return response.data
 
-async def delete_meeting(meeting_id: str):
-    supabase = get_supabase_client()
-    response = supabase.table(MEETINGS_TABLE).delete().eq("id", meeting_id).execute()
-    return response.data
-
 async def get_all_clients():
     supabase = get_supabase_client()
     response = supabase.table(CLIENTS_TABLE).select("*").execute()
@@ -97,11 +84,6 @@ async def create_client(data: dict):
 async def update_client(client_id: str, data: dict):
     supabase = get_supabase_client()
     response = supabase.table(CLIENTS_TABLE).update(data).eq("id", client_id).execute()
-    return response.data
-
-async def delete_client(client_id: str):
-    supabase = get_supabase_client()
-    response = supabase.table(CLIENTS_TABLE).delete().eq("id", client_id).execute()
     return response.data
 
 async def get_callbacks_due_today(user_id: str = None):
